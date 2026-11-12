@@ -303,9 +303,9 @@ textarea.f{min-height:64px;line-height:19px;resize:vertical}
 .chain span{background:#E8F1FE;color:#0F4C9B;font-size:11px;border-radius:5px;padding:4px 8px}
 .chain span.off{background:#F0F2F6;color:#98A3B3}
 .chain i{font-style:normal;color:#A9B4C4;margin:0 5px;font-size:11px}
-/* 工单流转（6 环节，对齐森林火灾风险场景一张图的处置流程） */
+/* 工单流转（7 环节，对齐森林火灾风险场景一张图的处置流程） */
 .odflow-card .bd{padding:9px 12px}
-.odflow{display:flex;align-items:stretch;gap:0;min-width:900px}
+.odflow{display:flex;align-items:stretch;gap:0;min-width:1120px}
 .odflow .step{flex:1;min-width:0;display:flex;align-items:center;gap:8px;padding:7px 9px;border:1px solid transparent;border-radius:8px;cursor:pointer}
 .odflow .step:hover{background:#F4F8FF}
 .odflow .step.on{background:#E8F1FE;border-color:#9CC2F5}
@@ -338,7 +338,7 @@ textarea.f{min-height:64px;line-height:19px;resize:vertical}
  border-radius:50%;background:rgba(107,118,136,.14);color:#6B7688;font-size:10px;line-height:1;cursor:pointer}
 .tag .del-x:hover{background:#D92B2B;color:#fff}
 .lnk.danger{color:#C21F1F}
-@media (max-width:1100px){.odflow{min-width:760px}}
+@media (max-width:1100px){.odflow{min-width:900px}}
 .mono{font-variant-numeric:tabular-nums}
 .tree .node{padding-left:14px;border-left:1px dashed #DFE5EE}
 .tree .nroot{padding:5px 0;font-weight:600}
@@ -1429,43 +1429,44 @@ function openSignal(sid){
  toast('信号不存在','err');
 }
 
-/* ---------- 工单处置流转（对齐 20-大冶市森林火灾风险场景-一张图 · 处置流程 6 环节） ---------- */
+/* ---------- 工单处置流转（对齐 20-大冶市森林火灾风险场景-一张图 · 处置流程 7 环节） ---------- */
 var FLOW_STEPS=[
- {n:'感知发现',d:'信号 / 巡查上报接入'},
- {n:'监测研判',d:'多源印证、确认工单等级'},
- {n:'预警下达',d:'红色工单审批与预警推送'},
- {n:'指挥调度',d:'指派责任主体、分级派发与签收'},
- {n:'现场处置',d:'到场打卡、进展反馈、结果报告'},
- {n:'核查销号',d:'图核 / 电话 / 现场核查后归档'}
+ {n:'感知发现',s:'感知发现',d:'信号 / 巡查上报接入'},
+ {n:'监测研判',s:'待确认',d:'多源印证、确认工单等级'},
+ {n:'预警下达',s:'待指派',d:'红色工单审批与预警推送'},
+ {n:'指挥调度',s:'待签收',d:'指派责任主体、分级派发与签收'},
+ {n:'现场处置',s:'处置中',d:'到场打卡、进展反馈、结果报告'},
+ {n:'现场复核',s:'待复核',d:'现场清理与验收复核，上传复核记录'},
+ {n:'评估销号',s:'已归档',d:'复核通过后开展质效评估并归档'}
 ];
 var FLOW_OF={signals:0,judging:1,approving:2,assigning:3,dispatching:3,signing:3,working:4,checking:5,
- done:6,archived:6,falseAlarm:6};
+ done:7,archived:7,falseAlarm:7};
 function flowIdx(st){var i=FLOW_OF[st];return i==null?0:i}
-function flowName(st){var i=flowIdx(st);return i>=6?'已归档':FLOW_STEPS[i].n}
-function flowTag(st){return '<span class="lv '+(flowIdx(st)>=6?'lv-gray':'lv-blue')+'">'+flowName(st)+'</span>'}
+function flowName(st){var i=flowIdx(st);return i>=7?'已归档':FLOW_STEPS[i].n}
+function flowTag(st){return '<span class="lv '+(flowIdx(st)>=7?'lv-gray':'lv-blue')+'">'+flowName(st)+'</span>'}
 function flowBar(pool){
- var f=F.events,cnt=[0,0,0,0,0,0];
- pool.forEach(function(x){var i=flowIdx(x.st);if(i<6)cnt[i]++});
+ var f=F.events,cnt=[0,0,0,0,0,0,0];
+ pool.forEach(function(x){var i=flowIdx(x.st);if(i<7)cnt[i]++});
  var running=pool.filter(function(x){return PHASE[x.st]!=='已办结'}).length;
- var h='<div class="card mb8 odflow-card"><div class="hd"><h3>工单流转<span class="sub">6 环节 · 点击环节筛选</span></h3>'+
+ var h='<div class="card mb8 odflow-card"><div class="hd"><h3>工单流转<span class="sub">7 环节 · 点击环节筛选</span></h3>'+
   '<span class="tiny muted">调度台账 · 在办 '+running+' 起</span></div><div class="bd"><div class="odflow-scroll"><div class="odflow">';
  FLOW_STEPS.forEach(function(step,i){
   var on=String(f.flow)===String(i);
   var clk=on?"F.events.flow='';render()":"F.events.flow="+i+";render()";
   h+='<div class="step'+(on?' on':'')+'" onclick="'+clk+'" title="'+esc(step.d)+'">'+
      '<span class="idx">'+(i+1)+'</span><span class="tx"><span class="n">'+step.n+'</span>'+
-     '<span class="c">'+cnt[i]+' 起在办</span></span></div>'+(i<5?'<i class="arw">›</i>':'');
+     '<span class="c">'+step.s+' · '+cnt[i]+' 起在办</span></span></div>'+(i<6?'<i class="arw">›</i>':'');
  });
  return h+'</div></div></div></div>';
 }
 function flowLedger(st){
- var cur=flowIdx(st),done=cur>=6;
- var h='<div class="card mb8"><div class="hd"><h3>处置流程<span class="sub">调度台账 '+(done?6:cur+1)+' / 6 环节</span></h3>'+stTag(st)+'</div><div class="bd"><div class="tl odflow-tl">';
+ var cur=flowIdx(st),done=cur>=7;
+ var h='<div class="card mb8"><div class="hd"><h3>处置流程<span class="sub">调度台账 '+(done?7:cur+1)+' / 7 环节</span></h3>'+stTag(st)+'</div><div class="bd"><div class="tl odflow-tl">';
  FLOW_STEPS.forEach(function(step,i){
   var stt=done||i<cur?'done':i===cur?'run':'wait';
   var tag=stt==='done'?'已完成':stt==='run'?'进行中':'待启动';
   var cls=stt==='done'?'lv-green':stt==='run'?'lv-blue':'lv-gray';
-  h+='<div class="tl-item '+stt+(stt==='run'?' now':'')+'"><div class="tt"><b>'+(i+1)+' / 6 · '+step.n+'</b><span class="lv '+cls+'">'+tag+'</span></div><div class="tx">'+step.d+'</div></div>';
+  h+='<div class="tl-item '+stt+(stt==='run'?' now':'')+'"><div class="tt"><b>'+(i+1)+' / 7 · '+step.n+'</b><span class="lv '+cls+'">'+tag+'</span></div><div class="tx">对应状态：'+step.s+' · '+step.d+'</div></div>';
  });
  return h+'</div></div></div>';
 }
