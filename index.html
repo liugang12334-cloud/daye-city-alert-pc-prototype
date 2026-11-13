@@ -261,7 +261,7 @@ textarea.f{min-height:64px;line-height:19px;resize:vertical}
 .drawer .dh{height:50px;flex:0 0 50px;background:linear-gradient(135deg,#0F4C9B,#1668DC);color:#fff;display:flex;align-items:center;padding:0 14px;gap:8px}
 .drawer .dh .t{font-size:15px;font-weight:600}
 .drawer .db{flex:1;overflow-y:auto;overscroll-behavior:contain;padding:12px}
-.drawer .df{flex:0 0 auto;padding:10px 14px;background:#fff;border-top:1px solid #E6EAF2;display:flex;gap:8px;justify-content:flex-end}
+.drawer .df{flex:0 0 auto;padding:10px 14px;background:#fff;border-top:1px solid #E6EAF2;display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
 .dlg{position:relative;z-index:1;flex:0 0 auto;margin:auto;background:#fff;border-radius:12px;width:440px;max-width:92vw;padding:18px 20px}
 .dlg h3{margin:0 0 4px;font-size:16px}
 .dlg .sub{color:#8A94A6;font-size:12px;margin-bottom:14px}
@@ -393,6 +393,291 @@ var MS_LIB={
 var MS_LEVELS=['blue','yellow','orange','red'];
 /* 工单类型字典：仅「单一工单 / 多跨工单」，工单管理、筛选、新建工单、详情统一口径 */
 var ETYPE=['单一工单','多跨工单'];
+
+/* ==================================================================
+   统一状态契约（大屏 20 号 / PC 后台 11 号共用同一份定义）
+   业务口径：一条告警信号记录贯穿「预警 → 预警工单」全生命周期；
+   研判确认后【沿用该条数据变更状态】生成工单，不新建第二份数据对象。
+   预警详情页与工单详情页为同一组件 openUnified()，仅 rec.status 不同。
+   两端共用 localStorage['dyyj_shared_v1'].onemapRecs 命名空间，状态变更实时回写。
+   PC 后台 = 业务主端（研判/指派/签收/复核/归档/台账）；大屏 = 指挥视图（读同库、发起流转）。
+   ================================================================== */
+var SHARED_NS='onemapRecs';
+var USTATUS={
+ waitConfirm:{t:'待确认',phase:'warn', c:'lv-blue',  stage:1,d:'告警信号接入，等待研判确认'},
+ waitAssign: {t:'待指派',phase:'warn', c:'lv-blue',  stage:2,d:'研判已确认，等待指定处置单位'},
+ waitSign:   {t:'待签收',phase:'order',c:'lv-orange',stage:3,d:'工单已生成并派发，等待属地签收'},
+ working:    {t:'处置中',phase:'order',c:'lv-orange',stage:4,d:'现场处置与进展反馈中'},
+ overtime:   {t:'已超时',phase:'order',c:'lv-red',   stage:4,d:'签收 / 反馈 / 报告超限时触发，超时事实全程留痕且不清除'},
+ waitRecheck:{t:'待复核',phase:'order',c:'lv-blue',  stage:5,d:'处置结果已提交，等待现场复核'},
+ returned:   {t:'退回待补充',phase:'order',c:'lv-red',stage:5,d:'复核不通过，退回补充材料或重新现场处置'},
+ done:       {t:'已完成',phase:'order',c:'lv-green',stage:6,d:'复核通过，处置完成、待评估销号'},
+ archived:   {t:'已归档',phase:'order',c:'lv-gray', stage:7,d:'评估销号完成，归档留痕'}
+};
+/* 主链 7 态：待确认 → 待指派(可跳过) → 待签收 → 处置中 → 待复核 → 已完成 → 已归档
+   旁支：处置中 ⇄ 已超时；待复核 ⇄ 退回待补充。二者均为可回边状态，非终态。 */
+var UMAIN=['waitConfirm','waitAssign','waitSign','working','waitRecheck','done','archived'];
+var UTRANS={
+ waitConfirm:[{a:'confirmAssign',t:'研判确认 · 直接指派并派发',to:'waitSign',primary:1},
+              {a:'confirmOnly',  t:'研判确认 · 转指派',      to:'waitAssign'},
+              {a:'falseAlarm',   t:'误报 / 蓝色关注类归档',  to:'archived'}],
+ waitAssign: [{a:'assign',       t:'指派单位并派发',          to:'waitSign',primary:1}],
+ waitSign:   [{a:'sign',         t:'属地签收工单',            to:'working',primary:1}],
+ working:    [{a:'submitResult', t:'提交处置结果',            to:'waitRecheck',primary:1},
+              {a:'markOvertime', t:'标记超时',                to:'overtime'}],
+ overtime:   [{a:'urge',         t:'催办并继续处置',          to:'working',primary:1},
+              {a:'submitResult', t:'直接提交处置结果',        to:'waitRecheck'}],
+ waitRecheck:[{a:'recheckPass',  t:'复核通过',                to:'done',primary:1},
+              {a:'recheckBack',  t:'复核退回',                to:'returned'}],
+ returned:   [{a:'resubmit',     t:'补充材料并重新提交',      to:'waitRecheck',primary:1},
+              {a:'rework',       t:'重新现场处置',            to:'working'}],
+ done:       [{a:'archive',      t:'评估销号 · 归档',          to:'archived',primary:1}],
+ archived:   []
+};
+/* PC 内部状态键 ↔ 统一状态键：内部键保留以兼容移动端与既有业务字段 */
+var ST_TO_U={signals:'waitConfirm',judging:'waitConfirm',approving:'waitAssign',assigning:'waitAssign',
+ dispatching:'waitSign',signing:'waitSign',working:'working',checking:'waitRecheck',
+ done:'done',archived:'archived',falseAlarm:'archived'};
+var U_TO_ST={waitConfirm:'signals',waitAssign:'assigning',waitSign:'signing',working:'working',
+ overtime:'working',waitRecheck:'checking',returned:'working',done:'done',archived:'archived'};
+var ULV={red:'红色',orange:'橙色',yellow:'黄色',blue:'蓝色',or:'橙色',ye:'黄色',bl:'蓝色'};
+var ULV_KEY={red:'red',orange:'orange',yellow:'yellow',blue:'blue',or:'orange',ye:'yellow',bl:'blue'};
+var UBASIS=[
+ '热成像 CH-09 连续 3 帧识别高温热源，温度 78℃ 超阈值 12℃',
+ 'NOAA-20 卫星热点像元与点位偏差 0.6 km，时间差 14 分钟',
+ '护林员现场上传照片可见明火，位于东南坡林缘',
+ '未来 24 小时无有效降水，午后阵风 6 级，火险等级：橙'
+];
+function uRecs(){if(!Array.isArray(DB.onemapRecs))DB.onemapRecs=[];return DB.onemapRecs}
+function uFind(id){
+ if(!id)return null;var a=uRecs();
+ for(var i=0;i<a.length;i++){var r=a[i];if(r.id===id||r.wo===id||r.srcId===id||r.pcId===id)return r}
+ return null;
+}
+function uBase(k){return k==='overtime'?'working':k==='returned'?'waitRecheck':k}
+function uNextWo(){
+ var n=2620;uRecs().forEach(function(r){var m=/WO-(\d+)/.exec(r.wo||'');if(m)n=Math.max(n,parseInt(m[1],10)+1)});
+ return 'WO-'+n;
+}
+/* 一条 PC 工单 / 告警信号对应一条统一记录；已存在则复用，绝不新建第二份 */
+function uEnsure(x,kind){
+ if(!x)return null;
+ var r=uFind(x.id)||uFind(x.srcId||'')||uFind(x.oid||'');
+ if(r)return r;
+ var at=(typeof ATYPE!=='undefined'&&ATYPE[x.type])||{n:x.type||'森林防火'};
+ var isSig=kind==='signal';
+ var r0={
+  id:isSig?x.id:('U-'+x.id),wo:isSig?(x.oid||''):x.id,
+  status:isSig?'waitConfirm':(ST_TO_U[x.st]||'waitSign'),
+  lv:x.lv||'yellow',type:at.n||x.type,town:x.area||'',spot:'',src:x.src||'',
+  time:x.t||x.create||now(),desc:x.d||x.title||'',
+  unit:(x.dispatchees||[]).join('、')||x.owner||'待指派',coord:x.place||x.area||'',
+  area:x.area0||'待现场核实',line:'—',overtime:x.uOvertime||0,
+  signAt:String(x.sign||'').slice(11,16)||'',
+  report:x.report?(x.report.desc||x.report.note||'已提交结果报告'):'',
+  recheck:x.uRecheck||'',basis:(x.uBasis||UBASIS).slice(),
+  timeline:(x.events||[]).map(function(e){return {t:e.t,b:e.b,x:e.x}}),
+  origin:'PC',srcId:x.id,pcId:x.id
+ };
+ if(!r0.timeline.length)r0.timeline=[{t:String(r0.time).slice(11,16)||nowHM(),b:'平台自动',
+   x:'告警信号接入，建立统一记录 '+r0.id+'（状态：'+USTATUS[r0.status].t+'）'}];
+ uRecs().push(r0);
+ return r0;
+}
+function uSync(){
+ try{
+  DB.signals.forEach(function(s){uEnsure(s,'signal')});
+  DB.orders.forEach(function(o){uEnsure(o,'order')});
+  uRecs().forEach(function(r){if(!USTATUS[r.status])r.status='waitSign';
+   if(!Array.isArray(r.timeline))r.timeline=[];if(!Array.isArray(r.basis))r.basis=UBASIS.slice();});
+ }catch(e){}
+}
+function uBadge(k){var S=USTATUS[k]||USTATUS.waitConfirm;return '<span class="lv '+S.c+'">'+S.t+'</span>'}
+/* 主链步骤条：当前态高亮；旁支状态用红色提示条说明主链停留位置 */
+function uSteps(r){
+ var cur=USTATUS[r.status].stage,base=uBase(r.status),side=base!==r.status;
+ var h='<div style="display:flex;gap:4px;flex-wrap:wrap;margin:2px 0 6px">';
+ UMAIN.forEach(function(k){
+  var st=USTATUS[k].stage,cls=k===base?'now':(st<cur?'done':'wait');
+  var bg=cls==='now'?'#1668DC':cls==='done'?'#E9F7EF':'#F3F5F9';
+  var fg=cls==='now'?'#fff':cls==='done'?'#1E9E63':'#8A94A6';
+  var bd=cls==='now'?'#1668DC':cls==='done'?'#BFE6D0':'#E6EAF2';
+  h+='<div style="flex:1;min-width:78px;text-align:center;background:'+bg+';color:'+fg+
+     ';border:1px solid '+bd+';border-radius:7px;padding:7px 3px;font-size:12px;font-weight:600;line-height:16px">'+
+     (st<cur&&k!==base?'✓ ':'')+USTATUS[k].t+
+     '<div style="font-size:10px;font-weight:400;opacity:.86;margin-top:2px">'+
+     (k==='waitAssign'?'预警 · 可跳过':(USTATUS[k].phase==='warn'?'预警阶段':'工单阶段'))+'</div></div>';
+ });
+ h+='</div>';
+ if(side)h+='<div class="tipbar red" style="display:block;margin-top:8px"><b>旁支状态 · '+USTATUS[r.status].t+
+  '</b>：'+USTATUS[r.status].d+'。主链进度停留在「'+USTATUS[base].t+
+  '」，处理后回到主链；超时 / 退回事实写入流转留痕，不因状态回退而清除。</div>';
+ return h;
+}
+function uDetailBody(r){
+ var S=USTATUS[r.status],lvTxt=ULV[r.lv]||r.lv;
+ var h='<style>#drawer .db td.uk{white-space:nowrap;width:1%;color:#6B7688}</style>';
+ h+='<div class="card mb8"><div class="hd"><h3>统一状态</h3><span class="tag">'+
+   (S.phase==='warn'?'预警阶段':'预警工单阶段')+'</span> '+uBadge(r.status)+
+   '<span class="tag">'+esc(lvTxt)+(S.phase==='warn'?'预警':'工单')+'</span>'+
+   '<span class="sub" style="margin-left:auto">统一记录 '+esc(r.id)+(r.wo?' · '+esc(r.wo):'')+
+   '</span></div><div class="bd">'+uSteps(r)+'</div></div>';
+ h+='<div class="card mb8"><div class="hd"><h3>基础信息 · 预警与工单共用同一条数据</h3></div><div class="bd">'+
+   '<table class="tb"><tr>'+tbcols(['字段','内容','字段','内容'])+'</tr>'+
+   '<tr><td class="uk">告警编号</td><td class="mono">'+esc(r.id)+'</td><td class="uk">工单编号</td><td class="mono">'+
+     (r.wo?esc(r.wo):'—（研判确认后生成）')+'</td></tr>'+
+   '<tr><td class="uk">告警类型</td><td>'+esc(r.type)+'</td><td class="uk">预警等级</td><td>'+esc(lvTxt)+'</td></tr>'+
+   '<tr><td class="uk">所在区域</td><td>'+esc(r.town+(r.spot?' · '+r.spot:''))+'</td><td class="uk">信息来源</td><td>'+esc(r.src)+'</td></tr>'+
+   '<tr><td class="uk">坐标点位</td><td>'+esc(r.coord)+'</td><td class="uk">告警时间</td><td class="mono">'+esc(r.time)+'</td></tr>'+
+   '<tr><td class="uk">告警描述</td><td>'+esc(r.desc)+'</td><td class="uk">处置单位</td><td>'+esc(r.unit||'待指派')+'</td></tr>'+
+   '</table></div></div>';
+ h+='<div class="card mb8"><div class="hd"><h3>研判依据 · 预警阶段留痕，两阶段一致</h3></div><div class="bd">'+
+   '<ul style="margin:0;padding-left:18px;font-size:12.5px;line-height:22px;color:#33404F">'+
+   (r.basis||UBASIS).map(function(x){return '<li>'+esc(x)+'</li>'}).join('')+'</ul></div></div>';
+ h+='<div class="card mb8"><div class="hd"><h3>'+
+   (S.phase==='warn'?'预警阶段信息':'预警工单阶段信息')+' · 按当前状态动态展示</h3></div><div class="bd">';
+ if(S.phase==='warn'){
+  var low=(r.lv==='blue'||r.lv==='bl');
+  var conf=low?62:r.lv==='red'?94:(r.lv==='orange'||r.lv==='or')?87:76;
+  h+='<div class="tipbar info mb8" style="display:block"><b>AI 研判结果</b>：'+
+    (low?'判定为低等级关注类信号，建议持续监测、暂不生成工单。':
+     '综合视频热源、卫星热点与护林员上报，判定为真实火情风险点；研判通过后<b>沿用本条记录变更状态</b>生成工单并一次完成派发。')+
+    '<div style="margin-top:6px">置信度 <b>'+conf+'%</b> ｜ 到场时限 '+
+    ({red:'30 分钟内到场',orange:'1 小时内到场',or:'1 小时内到场',yellow:'2 小时内到场',ye:'2 小时内到场',blue:'持续监测',bl:'持续监测'}[r.lv]||'2 小时内到场')+'</div></div>';
+  if(r.status==='waitAssign'){
+   h+='<div class="fi"><span class="lab">指派单位</span><span class="val"><select class="f" id="_uUnit">'+
+     UNITS.map(function(u){return '<option>'+esc(u)+'</option>'}).join('')+'</select></span></div>'+
+     '<div class="fi"><span class="lab">工单生成方式</span><span class="val">沿用告警记录变更状态，不新建数据对象</span></div>';
+  }else{
+   h+='<table class="tb"><tr>'+tbcols(['研判状态','拟派发单位','工单生成方式'])+'</tr>'+
+     '<tr><td>待值班指挥员确认</td><td>市森防指 + 属地乡镇</td><td>沿用告警记录变更状态，不新建数据对象</td></tr></table>';
+  }
+ }else{
+  h+='<table class="tb"><tr>'+tbcols(['工单要素','当前值','工单要素','当前值'])+'</tr>'+
+   '<tr><td class="uk">工单编号</td><td class="mono">'+esc(r.wo||'—')+'</td><td class="uk">派发单位</td><td>'+esc(r.unit||'待指派')+'</td></tr>'+
+   '<tr><td class="uk">签收时间</td><td>'+esc(r.signAt||'—')+'</td><td class="uk">处置结果</td><td>'+esc(r.report||'—')+'</td></tr>'+
+   '<tr><td class="uk">复核意见</td><td colspan="3">'+esc(r.recheck||'—')+'</td></tr></table>';
+  if(r.status==='overtime')h+='<div class="tipbar red" style="display:block;margin-top:8px"><b>已超时</b>：进展反馈超限时触发。可「催办并继续处置」回到处置中，也可「直接提交处置结果」进入待复核；超时记录永久写入流转留痕并计入质效评估。</div>';
+  if(r.status==='waitRecheck')h+='<div class="tipbar info" style="display:block;margin-top:8px"><b>待现场复核</b>：处置结果已提交。复核通过 → 已完成 → 归档；复核不通过 → 退回待补充，补充材料后重新提交复核，或退回重新现场处置。</div>';
+  if(r.status==='returned')h+='<div class="tipbar red" style="display:block;margin-top:8px"><b>退回待补充</b>：'+esc(r.recheck||'复核不通过，需补充处置材料')+'。补充后回到待复核；若需重新到场，可退回处置中（原有超时标记保留）。</div>';
+  if(r.overtime&&r.status!=='overtime')h+='<div class="tipbar" style="display:block;margin-top:8px">历史超时留痕：本记录曾触发超时，超时事实不因状态回退而清除，已计入质效评估。</div>';
+  if(r.status==='done'||r.status==='archived')h+='<div class="tipbar info" style="display:block;margin-top:8px"><b>复核与评估</b>：'+esc(r.recheck||'复核通过，处置结果与现场一致')+'。质效评估 94 分，'+(r.status==='done'?'待评估销号归档。':'已完成评估销号并归档。')+'</div>';
+ }
+ h+='</div></div>';
+ h+='<div class="card mb8"><div class="hd"><h3>状态流转留痕 · 同一条记录</h3></div><div class="bd"><div class="tl">'+
+   (r.timeline||[]).slice().reverse().map(function(e,i){
+     return '<div class="tl-item'+(i===0?' now':'')+'"><div class="tt">'+esc(e.t)+' · '+esc(e.b)+
+       '</div><div class="tx">'+esc(e.x)+'</div></div>'}).join('')+'</div></div></div>';
+ h+='<div class="tipbar info" style="display:block"><b>数据同源与端侧分工</b>：告警信号与预警工单为同一数据库中的同一条记录，研判确认后仅变更状态并生成工单编号，不新建数据对象；因此预警详情与工单详情为同一组件、仅当前状态不同。<br>'+
+   '<b>PC 后台</b>为业务主端（研判、指派、签收、复核、归档与台账留痕），<b>大屏</b>为指挥视图（读取同库记录、发起调度与状态流转）；两端共用状态字典、流转规则与 <code>dyyj_shared_v1</code> 的 <code>onemapRecs</code> 命名空间，状态变更经广播实时回写同库，PC 后台原有业务字段不受影响。</div>';
+ return h;
+}
+function uFooter(r){
+ var list=UTRANS[r.status]||[];
+ var h='<button class="btn line" onclick="closeDrawer()">关闭</button>';
+ list.forEach(function(t){
+  h+='<button class="btn'+(t.primary?'':' line')+'" onclick="uTransition(\''+esc(r.id)+'\',\''+t.a+'\')">'+esc(t.t)+'</button>';
+ });
+ if(!list.length)h+='<span class="tiny muted" style="align-self:center">已归档 · 只读</span>';
+ return h;
+}
+/* 统一详情页：预警与工单共用同一入口，仅 rec.status 不同 */
+function openUnified(id){
+ var src=byId(DB.signals,id)||O(id)||byId(DB.reports,id);
+ if(src)uEnsure(src,byId(DB.signals,id)?'signal':'order');
+ var r=uFind(id);
+ if(!r){toast('统一记录不存在','err');return}
+ var S=USTATUS[r.status];
+ openDrawer('预警 / 工单统一详情 · '+(S.phase==='warn'?'预警阶段':'工单阶段'),
+   r.id+(r.wo?' · '+r.wo:'')+' ｜ '+r.town,uDetailBody(r),uFooter(r));
+}
+/* 研判确认：沿用告警信号对象本身变更状态生成工单，不新建第二份对象 */
+function uPromoteSignal(sg,toStatus,ledgerAct){
+ var sid0=sg.id,t0=sg.t||now();
+ var at=ATYPE[sg.type]||ATYPE.forestFire,lv=sg.lv||'yellow',id=newOrderId();
+ sg.srcId=sid0;sg.sid=sid0;sg.id=id;
+ sg.st=toStatus==='waitAssign'?'assigning':'signing';sg.uStatus=toStatus;
+ sg.title=(sg.area||'')+String(sg.place||'').replace(/（.*/,'')+titleNoun(sg.type);
+ sg.area0='待现场核实';sg.dir='待核实';sg.weather='待核实';sg.suggest=(ELV[lv]||{}).t||'黄色';
+ sg.create=now();sg.dispatch=toStatus==='waitAssign'?'':now();sg.sign='';sg.arrive='';
+ sg.signals=[{t:String(t0).slice(11,16)||nowHM(),s:sg.src,d:sg.d,sid:sid0}];
+ sg.events=[{t:nowHM(),b:ME.n+'（'+ME.r+'）',x:'研判确认为预警，沿用告警记录 '+sid0+
+   ' 变更状态生成工单（建议等级：'+sg.suggest+'）'+(toStatus==='waitAssign'?'，等待指派':'，已一次完成派发')}];
+ sg.advice=(at.advice&&at.advice[lv])||['请按类型与等级在派发时限内完成分级派发'];
+ sg.dispatchees=toStatus==='waitAssign'?[]:['市森防指 + 属地乡镇'];
+ sg.owner=toStatus==='waitAssign'?'待指派':'市森防指 + 属地乡镇';
+ sg.notifies=[];sg.report=null;sg.etype=ETYPE[0];sg.uBasis=UBASIS.slice();
+ /* 按对象引用移除：此时 sg.id 已变更为新工单编号，不能用原告警编号查找 */
+ var i=DB.signals.indexOf(sg);if(i>=0)DB.signals.splice(i,1);
+ DB.orders.unshift(sg);
+ addSigLedger({act:ledgerAct||'confirm',sid:sid0,type:sg.type,src:sg.src,recv:t0,area:sg.area,
+  place:sg.place||'',d:sg.d,lv:lv,oid:id,note:ledgerAct==='check'?'研判存在不确定性，沿用告警记录生成核查任务':'研判确认，沿用告警记录变更状态生成工单'});
+ pushMsg('工单','【'+elvName(lv)+'】'+id+' 已研判确认并派发',at.n+'：'+sg.title+'（沿用告警 '+sid0+'）',id);
+ var rr=uFind(sid0)||uFind(id);
+ if(rr){rr.wo=id;rr.srcId=id;rr.pcId=id;rr.status=toStatus;
+  rr.timeline.push({t:nowHM(),b:'PC 后台 · '+ME.n,x:'研判确认：沿用告警记录生成工单 '+id+'，状态 '+USTATUS[toStatus].t})}
+ return sg;
+}
+/* 统一状态流转：只改 status + 留痕，同时回写 PC 工单内部状态（兼容移动端共用数据） */
+function uTransition(id,act){
+ var r=uFind(id);if(!r)return;
+ var t=(UTRANS[r.status]||[]).filter(function(x){return x.a===act})[0];if(!t)return;
+ var old=USTATUS[r.status].t;
+ if(act==='confirmAssign'||act==='confirmOnly'||act==='assign'){
+  if(!r.wo){
+   var sg=byId(DB.signals,r.id)||byId(DB.signals,r.srcId||'');
+   if(sg){var o=uPromoteSignal(sg,act==='confirmOnly'?'waitAssign':'waitSign');r.wo=o.id;r.srcId=o.id;r.pcId=o.id}
+   else r.wo=uNextWo();
+  }
+  var sel=$('_uUnit');if(sel)r.unit=sel.value;
+ }
+ if(act==='falseAlarm')r.wo='';
+ if(act==='sign')r.signAt=nowHM();
+ if(act==='markOvertime')r.overtime=1;
+ if(act==='urge')r.overtime=r.overtime||1;
+ if(act==='submitResult')r.report=r.report||'现场明火已扑灭，过火面积待复核，已上传现场处置记录';
+ if(act==='recheckBack')r.recheck='复核不通过：需补充过火面积认定、现场复核照片与处置人签字';
+ if(act==='recheckPass')r.recheck='复核通过，处置结果与现场一致';
+ if(act==='resubmit'){r.recheck='';r.report=(r.report||'')+'（已补充材料并重新提交）'}
+ if(act==='rework')r.recheck='';
+ r.status=t.to;
+ r.timeline.push({t:nowHM(),b:'PC 后台 · '+ME.n,x:old+' → '+USTATUS[t.to].t+'：'+t.t+(r.wo?'（'+r.wo+'）':'')});
+ var o2=O(r.srcId)||O(r.wo)||O(r.pcId);
+ if(o2){
+  o2.st=U_TO_ST[t.to]||o2.st;o2.uStatus=t.to;
+  if(act==='markOvertime'||r.overtime)o2.uOvertime=1;
+  if(act==='recheckBack')o2.uRecheck=r.recheck;
+  if(act==='sign')o2.sign=now();
+  if(act==='falseAlarm'){o2.st='falseAlarm'}
+  addEv(o2,'统一详情状态流转：'+old+' → '+USTATUS[t.to].t+'（'+t.t+'）');
+ }
+ logit('统一状态流转 '+old+'→'+USTATUS[t.to].t,r.id+(r.wo?' / '+r.wo:''));
+ save();render();openUnified(r.id);
+ toast('状态已更新：'+USTATUS[t.to].t,'ok');
+}
+/* 大屏状态变更广播 → 合并回 PC 后台同库记录 */
+function uOnScreenSync(){
+ try{
+  var bc=new BroadcastChannel('dyyj_sync');
+  bc.onmessage=function(e){
+   if(!e.data||e.data.from!=='SCREEN')return;
+   try{
+    var raw=JSON.parse(localStorage.getItem(KEY)||'{}');
+    var arr=raw&&raw[SHARED_NS];if(!Array.isArray(arr))return;
+    arr.forEach(function(x){
+     var r=uFind(x.id)||uFind(x.wo||'');
+     if(!r){uRecs().push(x);return}
+     if(USTATUS[x.status]){r.status=x.status;r.wo=x.wo||r.wo;r.overtime=x.overtime||0;
+      if(Array.isArray(x.timeline)&&x.timeline.length)r.timeline=x.timeline}
+     var oo=O(r.srcId)||O(r.wo)||O(r.pcId);
+     if(oo&&U_TO_ST[x.status]){oo.st=U_TO_ST[x.status];oo.uStatus=x.status}
+    });
+    render();
+   }catch(err){}
+  };
+ }catch(e){}
+}
+
 var ST={signals:{t:'待研判',c:'lv-gray'},judging:{t:'研判中',c:'lv-blue'},approving:{t:'待审批',c:'lv-red'},
  assigning:{t:'待指派',c:'lv-blue'},dispatching:{t:'待派发',c:'lv-blue'},signing:{t:'待签收',c:'lv-orange'},working:{t:'处置中',c:'lv-orange'},
  checking:{t:'待核查',c:'lv-blue'},done:{t:'已办结',c:'lv-gray'},archived:{t:'已归档',c:'lv-gray'},falseAlarm:{t:'误报解除',c:'lv-gray'}};
@@ -804,8 +1089,13 @@ function unifyOrderTerms(v){
  return v;
 }
 function load(){
- try{var s=localStorage.getItem(KEY);if(s){DB=JSON.parse(s);if(!DB||!DB.orders)DB=seed();}else{DB=seed();save();}}
+ var legacyNS=null;
+ try{var raw=JSON.parse(localStorage.getItem(KEY)||'{}');if(raw&&Array.isArray(raw[SHARED_NS]))legacyNS=raw[SHARED_NS]}catch(e){}
+ try{var s=localStorage.getItem(KEY);if(s){DB=JSON.parse(s);if(!DB||!DB.orders)DB=seed();}else{DB=seed();}}
  catch(e){DB=seed();}
+ /* 大屏先写入共享命名空间时，PC 侧仍以自身业务字段为主库，同时保留同库统一记录 */
+ if(legacyNS&&!Array.isArray(DB[SHARED_NS]))DB[SHARED_NS]=legacyNS;
+ if(!Array.isArray(DB[SHARED_NS]))DB[SHARED_NS]=[];
  /* 兼容旧共用数据源：工单语义统一 + 单一工单等级字典 */
  try{
   unifyOrderTerms(DB);
@@ -818,6 +1108,8 @@ function load(){
   (DB.sms||[]).forEach(function(x){x.c=String(x.c||'').split(LEGACY.smsVar).join('{工单编号}').split('{工单号}').join('{工单编号}')});
  }catch(e){}
  if(!Array.isArray(DB.sigLedger))DB.sigLedger=[];
+ uSync();
+ if(legacyNS)try{save()}catch(e){}
  return DB;
 }
 function save(){
@@ -825,7 +1117,7 @@ function save(){
    try{var bc=new BroadcastChannel('dyyj_sync');bc.postMessage({t:Date.now(),from:'PC'});bc.close();}catch(e){}
  }catch(e){toast('本地存储不可用，数据仅在当前页面有效','err');}
 }
-function resetDB(){DB=seed();save();toast('已重置为演示初始数据');render();}
+function resetDB(){DB=seed();DB[SHARED_NS]=[];uSync();save();toast('已重置为演示初始数据');render();}
 
 /* ==================================================================
    三、工具
@@ -1062,7 +1354,7 @@ window.onhashchange=function(){var k=cur();if(TITLE[k]){S.page=k;render()}};
    六、页面渲染
    ================================================================== */
 var P={};
-var F={events:{seg:0,kw:'',phase:'',st:'',type:'',etype:'',lv:'',flow:''},signals:{seg:0,type:'',ledgerAct:''},check:{kw:'',type:''},archive:{kw:'',type:''},sys:{tab:0},bi:{},risk:{view:'list'}};
+var F={events:{seg:0,kw:'',phase:'',st:'',ust:'',type:'',etype:'',lv:'',flow:''},signals:{seg:0,type:'',ledgerAct:''},check:{kw:'',type:''},archive:{kw:'',type:''},sys:{tab:0},bi:{},risk:{view:'list'}};
 
 function kpiCard(t,n,d,cls,ico){
  return '<div class="kpi '+(cls||'')+'"><div class="ico">'+(ico||'')+'</div><div class="t">'+t+'</div><div class="n">'+n+'</div><div class="d">'+d+'</div></div>';
@@ -1301,6 +1593,7 @@ function judgePanel(sid){
  var s=byId(DB.signals,sid);if(!s){toast('信号不存在','err');return}
  var curType=s.type||'forestFire';
  modal('<h3>值守研判 · '+esc(sid)+'</h3><div class="sub">'+esc(s.src)+' ｜ '+esc(s.area)+' · '+esc(s.place||'')+'</div>'+
+  '<div class="tipbar info mb8" style="display:block">研判确认后<b>沿用本条告警记录变更状态</b>生成工单并一次完成派发，不新建第二份数据对象；预警详情与工单详情为同一组件。</div>'+
   '<div class="tipbar red mb8">'+esc(s.d)+'</div>'+
   '<div class="fi"><span class="lab">告警类型</span><span class="val"><div class="row wrap" style="gap:6px">'+
     AT_ORDER.map(function(k){var a=ATYPE[k];
@@ -1312,10 +1605,10 @@ function judgePanel(sid){
   '<div class="fi"><span class="lab">研判意见</span><span class="val"><textarea class="f" id="_jNote" placeholder="填写研判依据，如：卡口复核确认明火，火线约 60 米"></textarea></span></div>'+
   '<div class="fi"><span class="lab">双源复核</span><span class="val"><label class="chk" onclick="this.classList.toggle(\'on\')"><span class="box"></span>已调用点位周边视频复核</label></span></div>'+
   '<div class="row mt12" style="gap:8px">'+
-   '<button class="btn" onclick="doJudge(\''+sid+'\',\'confirm\')">确认为预警 → 生成工单</button>'+
+   '<button class="btn" onclick="doJudge(\''+sid+'\',\'confirm\')">研判确认 · 生成工单并派发</button>'+
    '<button class="btn warn" onclick="doJudge(\''+sid+'\',\'check\')">转待核查</button>'+
    '<button class="btn gray" style="margin-left:auto" onclick="doJudge(\''+sid+'\',\'false\')">误报忽略</button>'+
-  '</div>');
+  '</div><div class="row mt8"><span class="lnk" onclick="closeModal();openUnified(\''+esc(sid)+'\')">查看统一详情（预警 / 工单同一条记录）</span></div>');
  window.__lv=s.lv;window.__type=curType;
  window.renderJudgeTips=function(){var a=ATYPE[window.__type]||ATYPE.forestFire;
   var t=($('_judgeTips'));if(t)t.innerHTML='<b>'+a.n+'</b> · 研判时限 '+Math.round(lim({type:window.__type},'judge')/60)+' 分钟<br>'+
@@ -1326,6 +1619,7 @@ function judgeReport(rid){
  var r=byId(DB.reports,rid);if(!r)return;
  var curType=r.atype||mapRepType(r.type);
  modal('<h3>移动端上报研判 · '+esc(rid)+'</h3><div class="sub">'+esc(r.type)+' ｜ '+esc(r.area)+'</div>'+
+  '<div class="tipbar info mb8" style="display:block">研判确认后<b>沿用本条上报记录变更状态</b>生成工单并一次完成派发；统一记录与 PC 后台、大屏共用同一命名空间。</div>'+
   '<div class="tipbar red mb8">'+esc(r.d)+'</div>'+
   '<div class="fi"><span class="lab">告警类型</span><span class="val"><div class="row wrap" style="gap:6px">'+
    AT_ORDER.map(function(k){var a=ATYPE[k];
@@ -1335,9 +1629,10 @@ function judgeReport(rid){
   '<div class="fi"><span class="lab">建议等级</span><span class="val">'+
    ELV_ORDER.map(function(k){return '<label class="chip'+(k==='yellow'?' on':'')+'" onclick="this.parentNode.querySelectorAll(\'.chip\').forEach(function(c){c.classList.remove(\'on\')});this.classList.add(\'on\');window.__lv=\''+k+'\'">'+elvName(k)+'</label>'}).join(' ')+'</span></div>'+
   '<div class="row mt12" style="gap:8px">'+
-   '<button class="btn" onclick="doJudgeReport(\''+rid+'\',\'confirm\')">确认为预警 → 生成工单</button>'+
+   '<button class="btn" onclick="doJudgeReport(\''+rid+'\',\'confirm\')">研判确认 · 生成工单并派发</button>'+
    '<button class="btn warn" onclick="doJudgeReport(\''+rid+'\',\'check\')">转待核查</button>'+
-   '<button class="btn gray" style="margin-left:auto" onclick="doJudgeReport(\''+rid+'\',\'false\')">误报忽略</button></div>');
+   '<button class="btn gray" style="margin-left:auto" onclick="doJudgeReport(\''+rid+'\',\'false\')">误报忽略</button></div>'+
+   '<div class="row mt8"><span class="lnk" onclick="closeModal();openUnified(\''+esc(rid)+'\')">查看统一详情（预警 / 工单同一条记录）</span></div>');
  window.__lv='yellow';window.__type=curType;
  window.renderJudgeTips2=function(){var a=ATYPE[window.__type]||ATYPE.forestFire;
   var t=($('_judgeTips2'));if(t)t.innerHTML='<b>'+a.n+'</b> · 研判时限 '+Math.round(lim({type:window.__type},'judge')/60)+' 分钟<br>'+
@@ -1363,32 +1658,29 @@ function doJudge(sid,act){
   DB.reports.unshift({id:'SB'+Date.now().toString().slice(-6),t:now(),type:'误报登记',area:s.area,st:'已办结',
    d:'信号 '+sid+'（'+s.src+'）经研判认定为误报'+(note?'：'+note:''),oid:'',
    sid:sid,src:s.src,recv:s.t,atype:type,lv:lv,place:s.place||'',d0:s.d,note:note});
+  var uf=uFind(sid);
+  if(uf){uf.status='archived';uf.wo='';
+   uf.timeline.push({t:nowHM(),b:'PC 后台 · '+ME.n,x:'研判为误报 / 蓝色关注类：统一记录归档，不生成工单'})}
   logit('研判 · 误报忽略',sid);save();closeModal();toast('已登记为误报并解除预警，台账已留痕','ok');render();return;
  }
- var id=newOrderId();
- var cname=(ELV[lv]||{}).t||'黄色';
- var apSec=lim({type:type},'approve')||DB.cfg.DISPATCH_SEC;
- var dpSec=lim({type:type},'dispatch')||DB.cfg.DISPATCH_SEC;
- var o={id:id,type:type,lv:lv,st:lv==='red'?'approving':'dispatching',title:s.area+(s.place||'').replace(/（.*/,'')+titleNoun(type),
-  area:s.area,place:s.place||s.area,src:s.src,area0:'待现场核实',dir:'待核实',weather:'待核实',suggest:cname,
-  create:now(),dispatch:'',sign:'',arrive:'',dlApprove:lv==='red'?dl(apSec):0,dlDispatch:lv==='red'?0:dl(dpSec),
-  signals:[{t:s.t,s:s.src,d:s.d,sid:s.id}],
-  events:[{t:nowHM(),b:ME.n+'（'+ME.r+'）',x:'研判确认为预警，生成'+a.n+'工单（建议等级：'+cname+'）'+(note?' ｜ '+note:'')}],
-  advice:(a.advice&&a.advice[lv])||['请按类型与等级在派发时限内完成分级派发'],
-  dispatchees:[],notifies:[],report:null};
+ /* 沿用该条告警数据：研判面板选定的等级 / 类型写回同一对象后，仅变更状态生成工单 */
+ s.lv=lv;s.type=type;
+ var o=uPromoteSignal(s,'waitSign',act==='check'?'check':'confirm'),id=o.id;
  if(act==='check'){
-  o.st='checking';o.advice=['属地须在 1 小时内反馈核查结果'];o.suggest='待核查';
-  o.area0='待核查';o.title=s.area+(s.place||'').replace(/（.*/,'')+titleNoun(type)+'核查任务';
-  o.events[0].x='研判存在不确定性 → 生成核查任务（属地 1 小时内反馈）';
+  o.st='checking';o.uStatus='waitRecheck';o.advice=['属地须在 1 小时内反馈核查结果'];
+  o.suggest='待核查';o.area0='待核查';
+  o.title=s.area+String(s.place||'').replace(/（.*/,'')+titleNoun(type)+'核查任务';
+  o.events[0].x='研判存在不确定性 → 沿用告警记录生成核查任务（属地 1 小时内反馈）';
  }
- DB.orders.unshift(o);
- addSigLedger({act:act==='check'?'check':'confirm',sid:s.id,type:type,src:s.src,recv:s.t,
-  area:s.area,place:s.place||'',d:s.d,lv:lv,oid:id,
-  note:note||(act==='check'?'研判存在不确定性，转属地核查':'研判确认为预警，按建议等级生成工单')});
- var i2=DB.signals.findIndex(function(x){return x.id===sid});if(i2>=0)DB.signals.splice(i2,1);
- if(act==='confirm')pushMsg(lv==='red'?'审批':'工单','【'+elvName(lv)+'】'+id+' '+(lv==='red'?'待审批':'待派发'),a.n+'：'+o.title+' 已生成工单，请'+(lv==='red'?'带班领导审批':'值守员完成派发')+'}。',id);
+ var ur=uFind(sid);
+ if(ur){
+  ur.status=act==='check'?'waitRecheck':'waitSign';ur.wo=id;ur.srcId=id;ur.pcId=id;
+  ur.unit=(o.dispatchees||[]).join('、')||'待指派';
+  ur.timeline.push({t:nowHM(),b:'PC 后台 · '+ME.n,
+   x:'研判确认：沿用告警记录 '+sid+' 变更状态生成工单 '+id+'（'+USTATUS[ur.status].t+'）'+(note?' ｜ '+note:'')});
+ }
  logit('研判 · '+(act==='confirm'?'确认预警':'转待核查'),id+' · '+a.n);
- save();closeModal();toast('已生成工单 '+id,'ok');go('events');
+ save();closeModal();toast('已沿用告警记录生成工单 '+id,'ok');go('events');
 }
 function doJudgeReport(rid,act){
  var r=byId(DB.reports,rid);if(!r)return;
@@ -1401,6 +1693,9 @@ function doJudgeReport(rid,act){
    place:r.area,d:d0,lv:lv,oid:'',note:'研判为误报，已解除'});
   r.st='已办结';r.d=d0+'（研判为误报，已解除）';r.atype=type;r.lv=lv;
   r.sid=r.id;r.src='移动端巡查上报';r.recv=r.t||'';r.place=r.area||'';r.d0=d0;r.note='研判为误报，已解除';
+  var uf2=uEnsure(r,'order');
+  if(uf2){uf2.status='archived';uf2.wo='';
+   uf2.timeline.push({t:nowHM(),b:'PC 后台 · '+ME.n,x:'移动端上报研判为误报：统一记录归档，不生成工单'})}
   logit('上报研判 · 误报',rid);save();closeModal();toast('已标记为误报，台账已留痕');render();return
  }
  var id=newOrderId();
@@ -1414,8 +1709,13 @@ function doJudgeReport(rid,act){
   events:[{t:nowHM(),b:ME.n+'（'+ME.r+'）',x:'移动端上报研判确认 → 生成'+a.n+'工单（建议等级：'+cname+'）'}],
   advice:(a.advice&&a.advice[lv])||['请按类型与等级在派发时限内完成分级派发'],dispatchees:[],notifies:[],report:null};
  if(act==='check'){o.st='checking';o.title=r.area+'核查任务';o.advice=['属地 1 小时内反馈核查结果']}
+ o.srcId=rid;o.uStatus=act==='check'?'waitRecheck':'waitSign';o.uBasis=UBASIS.slice();
  DB.orders.unshift(o);
  r.st=act==='confirm'?'已转工单':'已办结';r.oid=id;r.atype=type;
+ var ur2=uEnsure(r,'order');
+ if(ur2){ur2.wo=id;ur2.srcId=id;ur2.pcId=id;ur2.status=o.uStatus;
+  ur2.timeline.push({t:nowHM(),b:'PC 后台 · '+ME.n,
+   x:'移动端上报研判确认：沿用上报记录生成工单 '+id+'（'+USTATUS[ur2.status].t+'）'})}
  addSigLedger({act:act==='check'?'check':'confirm',sid:r.id,type:type,src:'移动端巡查上报',recv:r.t,
   area:r.area,place:r.area,d:r.d,lv:lv,oid:id,
   note:act==='check'?'移动端上报研判存在不确定性，转属地核查':'移动端上报研判确认，已生成工单'});
@@ -1493,13 +1793,26 @@ function ordersPool(){
   pool.push({k:'order',id:o.id,t:o.create,src:o.src,title:o.title,area:o.area,lv:o.lv,st:o.st,type:o.type,
    place:o.place||o.area,owner:o.owner||'',oid:o.id,dispatchees:o.dispatchees||[],etype:o.etype||''});
  });
+ /* 大屏写入同库的统一记录：PC 后台作为业务主端同样可见、可发起流转 */
+ (DB[SHARED_NS]||[]).forEach(function(r){
+  if(r.origin==='PC'||!USTATUS[r.status])return;
+  if(pool.some(function(x){return x.id===r.id||x.id===r.wo||x.oid===r.wo}))return;
+  pool.push({k:'shared',id:r.id,t:r.time,src:r.src,title:r.desc,area:r.town||'',
+   lv:ULV_KEY[r.lv]||'yellow',st:U_TO_ST[r.status]||'signing',type:'forestFire',
+   place:r.coord||r.town||'',owner:r.unit||'',oid:r.wo||'',etype:ETYPE[0]});
+ });
  pool.forEach(function(x){x.etype=odTypeOf(x)});
  return pool;
 }
 P.events=function(){
  var f=F.events;
  var pool=ordersPool();
+ pool.forEach(function(x){
+  var src=x.k==='signal'?byId(DB.signals,x.id):(x.k==='order'?O(x.id):null);
+  x._ur=src?uEnsure(src,x.k==='signal'?'signal':'order'):(uFind(x.id)||uFind(x.oid||'')||null);
+ });
  var arr=pool.filter(function(x){
+  if(f.ust&&(!x._ur||x._ur.status!==f.ust))return false;
   if(f.phase&&PHASE[x.st]!==f.phase)return false;
   if(f.st&&x.st!==f.st)return false;
   if(f.type&&x.type!==f.type)return false;
@@ -1516,6 +1829,8 @@ P.events=function(){
    ['','待受理','处置中','已办结'].map(function(p){return '<option value="'+p+'"'+(f.phase===p?' selected':'')+'>'+(p||'全部阶段')+'</option>'}).join('')+'</select>'+
   '<span class="tiny muted">状态</span><select class="f" style="width:128px" onchange="F.events.st=this.value;render()">'+
    '<option value="">全部状态</option>'+Object.keys(ST).map(function(k){return '<option value="'+k+'"'+(f.st===k?' selected':'')+'>'+esc(ST[k].t)+'</option>'}).join('')+'</select>'+
+  '<span class="tiny muted">统一状态</span><select class="f" style="width:132px" onchange="F.events.ust=this.value;render()">'+
+   '<option value="">全部统一状态</option>'+Object.keys(USTATUS).map(function(k){return '<option value="'+k+'"'+(f.ust===k?' selected':'')+'>'+USTATUS[k].t+'</option>'}).join('')+'</select>'+
   typeFilter('F.events.type',f.type)+
   '<select class="f" style="width:125px" onchange="F.events.etype=this.value;render()"><option value="">全部工单类型</option>'+
    ETYPE.map(function(v){return '<option value="'+v+'"'+(f.etype===v?' selected':'')+'>'+v+'</option>'}).join('')+'</select>'+
@@ -1523,12 +1838,13 @@ P.events=function(){
    '<option value="">全部等级</option>'+ELV_ORDER.map(function(k){return '<option value="'+k+'"'+(f.lv===k?' selected':'')+'>'+elvName(k)+'</option>'}).join('')+'</select>'+
   '<button class="btn" onclick="newOrderForm()">＋ 新建工单</button>'+
   '<span class="tiny muted">共 '+arr.length+' 起工单</span></div></div></div>';
- var cols=['工单类型','告警类型','工单编号','时间','信息来源','工单摘要','区域','工单等级','阶段','状态','当前环节','责任主体 / 派发对象','操作'];
+ var cols=['工单类型','告警类型','工单编号','时间','信息来源','工单摘要','区域','工单等级','阶段','状态','统一状态','当前环节','责任主体 / 派发对象','操作'];
  h+='<div class="card"><div style="overflow-x:auto"><table class="tb odtb"><tr>'+tbcols(cols)+'</tr>'+
   (arr.map(function(x){
    var o=x.k==='order'?(O(x.id)||{}):{};
-   var detail=x.k==='order'?'openOrder':'openOrderDetail';
+   var detail=x.k==='order'?'openOrder':(x.k==='shared'?'openUnified':'openOrderDetail');
    var acts='<span class="lnk" onclick="'+detail+'(\''+esc(x.id)+'\')">详情</span>';
+   if(x._ur&&x.k!=='shared')acts+=' <span class="lnk" onclick="openUnified(\''+esc(x._ur.id)+'\')">统一详情</span>';
    if(x.k==='signal')acts+=' <span class="lnk" onclick="judgePanel(\''+esc(x.id)+'\')">受理研判</span>';
    else if(x.k==='report'&&x.st==='signals')acts+=' <span class="lnk" onclick="judgeReport(\''+esc(x.id)+'\')">受理研判</span>';
    else if(x.k==='order'){
@@ -1541,7 +1857,7 @@ P.events=function(){
    return '<tr class="click"><td><span class="tag">'+esc(x.etype)+'</span></td><td>'+typeTag(x.type)+'</td>'+
     '<td class="nowrap mono">'+esc(x.id)+'</td><td class="nowrap mono">'+esc(x.t)+'</td><td>'+esc(x.src)+'</td>'+
     '<td>'+esc(x.title)+'</td><td>'+esc(x.area)+'</td><td>'+lvTag(x.lv)+'</td>'+
-    '<td>'+phTag(x.st)+'</td><td>'+stTag(x.st)+'</td><td class="nowrap">'+flowTag(x.st)+'</td>'+
+    '<td>'+phTag(x.st)+'</td><td>'+stTag(x.st)+'</td><td class="nowrap">'+(x._ur?uBadge(x._ur.status):'<span class="muted">—</span>')+'</td><td class="nowrap">'+flowTag(x.st)+'</td>'+
     '<td class="small">'+esc(owner)+'</td><td class="nowrap">'+acts+'</td></tr>';
   }).join('')||'<tr><td colspan="'+cols.length+'">'+emptyBox('没有符合条件的工单')+'</td></tr>')+'</table></div></div>';
  return h;
@@ -2692,6 +3008,7 @@ function download(name,content,type){
    ================================================================== */
 load();
 if(!ME||!ME.n||ME.n==='—')ME=DB.roles[0];
+uOnScreenSync();
 var k0=cur();if(TITLE[k0])S.page=k0;
 render();
 </script>
