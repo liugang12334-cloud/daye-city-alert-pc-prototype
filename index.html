@@ -498,16 +498,16 @@ function uBadge(k){var S=USTATUS[k]||USTATUS.waitConfirm;return '<span class="lv
 /* 主链步骤条：当前态高亮；旁支状态用红色提示条说明主链停留位置 */
 function uSteps(r){
  var cur=USTATUS[r.status].stage,base=uBase(r.status),side=base!==r.status;
- var h='<div style="display:flex;gap:4px;flex-wrap:wrap;margin:2px 0 6px">';
+ var h='<div style="display:flex;gap:4px;flex-wrap:nowrap;margin:2px 0 6px">';
  UMAIN.forEach(function(k){
   var st=USTATUS[k].stage,cls=k===base?'now':(st<cur?'done':'wait');
   var bg=cls==='now'?'#1668DC':cls==='done'?'#E9F7EF':'#F3F5F9';
   var fg=cls==='now'?'#fff':cls==='done'?'#1E9E63':'#8A94A6';
   var bd=cls==='now'?'#1668DC':cls==='done'?'#BFE6D0':'#E6EAF2';
-  h+='<div style="flex:1;min-width:78px;text-align:center;background:'+bg+';color:'+fg+
-     ';border:1px solid '+bd+';border-radius:7px;padding:7px 3px;font-size:12px;font-weight:600;line-height:16px">'+
+  h+='<div class="ustep" style="flex:1;min-width:0;text-align:center;background:'+bg+';color:'+fg+
+     ';border:1px solid '+bd+';border-radius:7px;padding:7px 3px;font-size:13.5px;font-weight:600;line-height:19px">'+
      (st<cur&&k!==base?'✓ ':'')+USTATUS[k].t+
-     '<div style="font-size:10px;font-weight:400;opacity:.86;margin-top:2px">'+
+     '<div style="font-size:10.5px;font-weight:400;opacity:.86;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+
      (k==='waitAssign'?'预警 · 可跳过':(USTATUS[k].phase==='warn'?'预警阶段':'工单阶段'))+'</div></div>';
  });
  h+='</div>';
@@ -515,6 +515,59 @@ function uSteps(r){
   '</b>：'+USTATUS[r.status].d+'。主链进度停留在「'+USTATUS[base].t+
   '」，处理后回到主链；超时 / 退回事实写入流转留痕，不因状态回退而清除。</div>';
  return h;
+}
+
+/* 上报图片：真实数据由移动端上报 / 处置回传写入 r.photos=[{n,s,t,bg}]；原型按来源生成抓拍画面兜底 */
+var UTH={
+ a:'radial-gradient(circle at 62% 44%,#ffc078,#c2410c 36%,#4a1508 70%,#1b0a06)',
+ b:'radial-gradient(circle at 40% 60%,#8fd6c8,#2f6f63 40%,#0f2a28)',
+ c:'radial-gradient(circle at 55% 50%,#ff9a5c,#7c2d12 45%,#24100a)',
+ d:'radial-gradient(circle at 58% 42%,#ffe08a,#a16207 45%,#241a06)'
+};
+function uPhotoList(r){
+ if(Object.prototype.toString.call(r.photos)==='[object Array]')return r.photos;
+ var raw=r.time||r.t||'',t=raw.length>10?raw.slice(11,16):(raw||'--:--'),src=r.src||'监测设备';
+ var L=[{n:'告警抓拍',s:src,t:t,bg:r.thumb||UTH.b}];
+ if(/人巡|护林|移动端|巡查|上报/.test(src+' '+(r.type||''))){
+  L.push({n:'上报现场照片 1',s:'护林员移动端上报 · 定位水印',t:t,bg:UTH.a});
+  L.push({n:'上报现场照片 2',s:'护林员移动端上报 · 定位水印',t:t,bg:UTH.d});
+ }
+ var S=USTATUS[r.status]||USTATUS.waitConfirm;
+ if(S.phase==='order')L.push({n:'现场处置照片',s:(r.unit||'处置单位')+'回传',t:r.signAt||t,bg:UTH.a});
+ if(/waitRecheck|returned|done|archived/.test(r.status))L.push({n:'现场复核照片',s:'现场复核回传',t:t,bg:UTH.b});
+ return L.slice(0,4);
+}
+function uPhotoFace(p,id){
+ return '<span class="ph-grid"></span><span class="ph-hill"></span><span class="ph-hill2"></span>'+
+  '<span class="ph-wm">'+esc(p.t)+' · '+esc(id)+'</span>';
+}
+function uPhotoHtml(r){
+ var L=uPhotoList(r);
+ if(!L.length)return '<div class="uph-empty">暂无上报图片</div>';
+ return '<div class="uphotos">'+L.map(function(p,i){
+  return '<div class="uph" data-uph="'+i+'" title="点击查看大图" onclick="uPhotoViewer(\''+esc(r.id)+'\','+i+')" style="background:'+p.bg+'">'+
+   uPhotoFace(p,r.id)+'<span class="ph-zoom">⤢</span>'+
+   '<div class="ph-t"><b>'+esc(p.n)+'</b><em>'+esc(p.s)+'</em></div></div>';
+ }).join('')+'</div>';
+}
+var UPV={id:'',k:0};
+function uPhotoViewer(id,i){UPV.id=id;UPV.k=parseInt(i,10)||0;uPhotoDraw();}
+function uPhotoStep(d){
+ var r=uFind(UPV.id);if(!r)return;
+ var L=uPhotoList(r);if(!L.length)return;
+ UPV.k=(UPV.k+d+L.length)%L.length;uPhotoDraw();
+}
+function uPhotoDraw(){
+ var r=uFind(UPV.id);if(!r)return;
+ var L=uPhotoList(r);if(!L.length)return;
+ var k=Math.max(0,Math.min(L.length-1,UPV.k)),p=L[k];
+ modal('<div class="upv-h"><b>'+esc(p.n)+'</b><span>'+esc(r.id)+' · '+(k+1)+' / '+L.length+'</span>'+
+   '<button class="btn line" style="margin-left:auto" onclick="closeModal()">关闭</button></div>'+
+   '<div class="upv-img" style="background:'+p.bg+'">'+uPhotoFace(p,r.id)+'</div>'+
+   '<div class="upv-cap"><span>'+esc(p.s)+' ｜ '+esc(p.t)+'</span>'+
+   (L.length>1?'<span style="margin-left:auto"><button class="btn line" onclick="uPhotoStep(-1)">上一张</button> '+
+   '<button class="btn line" onclick="uPhotoStep(1)">下一张</button></span></div>':'</div>'),
+   {center:true,width:'720px'});
 }
 function uDetailBody(r){
  var S=USTATUS[r.status],lvTxt=ULV[r.lv]||r.lv;
@@ -526,7 +579,28 @@ function uDetailBody(r){
   '.ucard{position:relative;padding:8px 10px 8px 12px;border:1px solid #DDE9F8;background:linear-gradient(90deg,#EAF3FD,#F8FBFF)}'+
   '.ucard:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:#1668DC}'+
   '.ucard em{display:block;font-size:10.5px;color:#6B7688;font-style:normal}'+
-  '.ucard b{display:block;margin-top:3px;font-size:13px;font-weight:700;color:#1B2430;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}</style>';
+  '.ucard b{display:block;margin-top:3px;font-size:13px;font-weight:700;color:#1B2430;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'+
+
+  '.uphotos{display:flex;flex-wrap:wrap;gap:8px}'+
+  '.uph,.upv-img{position:relative;overflow:hidden;border:1px solid #DDE9F8;background-size:cover}'+
+  '.uph{width:148px;height:98px;border-radius:6px;cursor:zoom-in;box-shadow:0 2px 8px rgba(20,60,100,.10);transition:transform .18s,box-shadow .18s}'+
+  '.uph:hover{transform:translateY(-2px);box-shadow:0 6px 16px rgba(20,60,100,.20)}'+
+  '.ph-grid{position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.07) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.07) 1px,transparent 1px);background-size:26px 26px}'+
+  '.ph-grid:after{content:"";position:absolute;left:50%;top:46%;width:26px;height:26px;transform:translate(-50%,-50%);border:1px solid rgba(255,255,255,.6);border-radius:50%}'+
+  '.ph-hill{position:absolute;left:0;right:0;bottom:0;height:62%;background:rgba(8,24,34,.42);clip-path:polygon(0 70%,16% 38%,32% 64%,50% 20%,68% 58%,85% 32%,100% 62%,100% 100%,0 100%)}'+
+  '.ph-hill2{position:absolute;left:0;right:0;bottom:0;height:42%;background:rgba(5,16,26,.62);clip-path:polygon(0 58%,22% 28%,44% 66%,64% 34%,82% 62%,100% 40%,100% 100%,0 100%)}'+
+  '.ph-wm{position:absolute;left:8px;right:34px;top:7px;color:rgba(255,255,255,.9);font-size:9.5px;letter-spacing:.4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 3px rgba(0,0,0,.7)}'+
+  '.ph-zoom{position:absolute;right:7px;top:6px;width:20px;height:20px;display:grid;place-items:center;color:#fff;font-size:13px;background:rgba(6,28,50,.5);border-radius:4px}'+
+  '.ph-t{position:absolute;left:0;right:0;bottom:0;padding:6px 8px;color:#fff;background:linear-gradient(180deg,transparent,rgba(4,18,32,.86))}'+
+  '.ph-t b{display:block;font-size:11.5px;font-weight:600}'+
+  '.ph-t em{display:block;font-style:normal;font-size:9.5px;opacity:.85;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}'+
+  '.uph-empty{padding:14px;border:1px dashed #C9D8EC;color:#8A94A6;font-size:12px;text-align:center}'+
+  '.upv-h{display:flex;align-items:center;gap:12px;margin-bottom:10px}'+
+  '.upv-h b{font-size:15px;color:#1B2430}'+
+  '.upv-h span{font-size:12px;color:#8A94A6}'+
+  '.upv-img{height:340px;border-radius:6px}'+
+  '.upv-cap{display:flex;align-items:center;gap:10px;margin-top:10px;font-size:12px;color:#6B7688}'+
+  '</style>';
  h+='<div class="card mb8"><div class="hd"><h3>统一状态</h3></div><div class="bd">'+
    '<div class="ucards">'+
    '<div class="ucard"><em>点位</em><b>'+esc(r.town+(r.spot?' · '+r.spot:''))+'</b></div>'+
@@ -542,6 +616,7 @@ function uDetailBody(r){
    '<tr><td class="uk">坐标点位</td><td>'+esc(r.coord)+'</td><td class="uk">告警时间</td><td class="mono">'+esc(r.time)+'</td></tr>'+
    '<tr><td class="uk">告警描述</td><td>'+esc(r.desc)+'</td><td class="uk">处置单位</td><td>'+(S.phase==='warn'?'':esc(r.unit||''))+'</td></tr>'+
    '</table></div></div>';
+ h+='<div class="card mb8"><div class="hd"><h3>上报图片 <span class="sub">点击查看大图</span></h3></div><div class="bd">'+uPhotoHtml(r)+'</div></div>';
  h+='<div class="card mb8"><div class="hd"><h3>研判依据 · 预警阶段留痕，两阶段一致</h3></div><div class="bd">'+
    '<ul style="margin:0;padding-left:18px;font-size:12.5px;line-height:22px;color:#33404F">'+
    (r.basis||UBASIS).map(function(x){return '<li>'+esc(x)+'</li>'}).join('')+'</ul></div></div>';
