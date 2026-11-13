@@ -518,6 +518,9 @@ function uSteps(r){
 }
 function uDetailBody(r){
  var S=USTATUS[r.status],lvTxt=ULV[r.lv]||r.lv;
+ /* 三信息卡「预警等级」值按等级本色显示（红/橙/黄/蓝） */
+ var ULV_COLOR={red:'#D92B2B',orange:'#E07A18',yellow:'#C9921A',blue:'#1668DC'};
+ var lvColor=ULV_COLOR[ULV_KEY[r.lv]||r.lv]||'#1B2430';
  var h='<style>#drawer .db td.uk{white-space:nowrap;width:1%;color:#6B7688}'+
   '.ucards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 10px}'+
   '.ucard{position:relative;padding:8px 10px 8px 12px;border:1px solid #DDE9F8;background:linear-gradient(90deg,#EAF3FD,#F8FBFF)}'+
@@ -527,7 +530,7 @@ function uDetailBody(r){
  h+='<div class="card mb8"><div class="hd"><h3>统一状态</h3></div><div class="bd">'+
    '<div class="ucards">'+
    '<div class="ucard"><em>点位</em><b>'+esc(r.town+(r.spot?' · '+r.spot:''))+'</b></div>'+
-   '<div class="ucard"><em>预警等级</em><b>'+esc(lvTxt)+'预警</b></div>'+
+   '<div class="ucard"><em>预警等级</em><b style="color:'+lvColor+'">'+esc(lvTxt)+'预警</b></div>'+
    '<div class="ucard"><em>告警时间</em><b>'+esc(r.time)+'</b></div></div>'+
    uSteps(r)+'</div></div>';
  h+='<div class="card mb8"><div class="hd"><h3>基础信息</h3></div><div class="bd">'+
