@@ -517,13 +517,13 @@ function uSteps(r){
 function uDetailBody(r){
  var S=USTATUS[r.status],lvTxt=ULV[r.lv]||r.lv;
  var h='<style>#drawer .db td.uk{white-space:nowrap;width:1%;color:#6B7688}</style>';
- h+='<div class="card mb8"><div class="hd"><h3>统一状态</h3><span class="tag">'+
+ h+='<div class="card mb8"><div class="hd"><h3>统一状态</h3>'+
+   '<span class="tag">'+esc(lvTxt)+'预警</span> <span class="tag">'+
    (S.phase==='warn'?'预警阶段':'预警工单阶段')+'</span> '+uBadge(r.status)+
-   '<span class="tag">'+esc(lvTxt)+(S.phase==='warn'?'预警':'工单')+'</span>'+
    '<span class="sub" style="margin-left:auto">统一记录 '+esc(r.id)+(r.wo?' · '+esc(r.wo):'')+
    '</span></div><div class="bd">'+uSteps(r)+'</div></div>';
- h+='<div class="card mb8"><div class="hd"><h3>基础信息 · 预警与工单共用同一条数据</h3></div><div class="bd">'+
-   '<table class="tb"><tr>'+tbcols(['字段','内容','字段','内容'])+'</tr>'+
+ h+='<div class="card mb8"><div class="hd"><h3>基础信息</h3></div><div class="bd">'+
+   '<table class="tb">'+
    '<tr><td class="uk">告警编号</td><td class="mono">'+esc(r.id)+'</td><td class="uk">工单编号</td><td class="mono">'+
      (r.wo?esc(r.wo):'—（研判确认后生成）')+'</td></tr>'+
    '<tr><td class="uk">告警类型</td><td>'+esc(r.type)+'</td><td class="uk">预警等级</td><td>'+esc(lvTxt)+'</td></tr>'+
@@ -541,7 +541,7 @@ function uDetailBody(r){
   var conf=low?62:r.lv==='red'?94:(r.lv==='orange'||r.lv==='or')?87:76;
   h+='<div class="tipbar info mb8" style="display:block"><b>AI 研判结果</b>：'+
     (low?'判定为低等级关注类信号，建议持续监测、暂不生成工单。':
-     '综合视频热源、卫星热点与护林员上报，判定为真实火情风险点；研判通过后<b>沿用本条记录变更状态</b>生成工单并一次完成派发。')+
+     '综合视频热源、卫星热点与护林员上报，判定为真实火情风险点。')+
     '<div style="margin-top:6px">置信度 <b>'+conf+'%</b> ｜ 到场时限 '+
     ({red:'30 分钟内到场',orange:'1 小时内到场',or:'1 小时内到场',yellow:'2 小时内到场',ye:'2 小时内到场',blue:'持续监测',bl:'持续监测'}[r.lv]||'2 小时内到场')+'</div></div>';
   if(r.status==='waitAssign'){
@@ -564,12 +564,10 @@ function uDetailBody(r){
   if(r.status==='done'||r.status==='archived')h+='<div class="tipbar info" style="display:block;margin-top:8px"><b>复核与评估</b>：'+esc(r.recheck||'复核通过，处置结果与现场一致')+'。质效评估 94 分，'+(r.status==='done'?'待评估销号归档。':'已完成评估销号并归档。')+'</div>';
  }
  h+='</div></div>';
- h+='<div class="card mb8"><div class="hd"><h3>状态流转留痕 · 同一条记录</h3></div><div class="bd"><div class="tl">'+
+ h+='<div class="card mb8"><div class="hd"><h3>状态流转留痕</h3></div><div class="bd"><div class="tl">'+
    (r.timeline||[]).slice().reverse().map(function(e,i){
      return '<div class="tl-item'+(i===0?' now':'')+'"><div class="tt">'+esc(e.t)+' · '+esc(e.b)+
        '</div><div class="tx">'+esc(e.x)+'</div></div>'}).join('')+'</div></div></div>';
- h+='<div class="tipbar info" style="display:block"><b>数据同源与端侧分工</b>：告警信号与预警工单为同一数据库中的同一条记录，研判确认后仅变更状态并生成工单编号，不新建数据对象；因此预警详情与工单详情为同一组件、仅当前状态不同。<br>'+
-   '<b>PC 后台</b>为业务主端（研判、指派、签收、复核、归档与台账留痕），<b>大屏</b>为指挥视图（读取同库记录、发起调度与状态流转）；两端共用状态字典、流转规则与 <code>dyyj_shared_v1</code> 的 <code>onemapRecs</code> 命名空间，状态变更经广播实时回写同库，PC 后台原有业务字段不受影响。</div>';
  return h;
 }
 function uFooter(r){
@@ -588,7 +586,7 @@ function openUnified(id){
  var r=uFind(id);
  if(!r){toast('统一记录不存在','err');return}
  var S=USTATUS[r.status];
- openDrawer('预警 / 工单统一详情 · '+(S.phase==='warn'?'预警阶段':'工单阶段'),
+ openDrawer('预警详情',
    r.id+(r.wo?' · '+r.wo:'')+' ｜ '+r.town,uDetailBody(r),uFooter(r));
 }
 /* 研判确认：沿用告警信号对象本身变更状态生成工单，不新建第二份对象 */
