@@ -556,8 +556,7 @@ function uDetailBody(r){
     '<div style="margin-top:6px">置信度 <b>'+conf+'%</b>'+
     (r.limit?' ｜ 处置时限 '+esc(r.limit):'')+'</div></div>';
  }else{
-  h+='<table class="tb"><tr>'+tbcols(['工单要素','当前值','工单要素','当前值'])+'</tr>'+
-   '<tr><td class="uk">工单编号</td><td class="mono">'+esc(r.wo||'—')+'</td><td class="uk">派发单位</td><td>'+esc(r.unit||'')+'</td></tr>'+
+  h+='<table class="tb">'+
    '<tr><td class="uk">签收时间</td><td>'+esc(r.signAt||'—')+'</td><td class="uk">处置时限</td><td>'+esc(r.limit||'—')+'</td></tr>'+
    '<tr><td class="uk">处置结果</td><td colspan="3">'+esc(r.report||'—')+'</td></tr>'+
    '<tr><td class="uk">复核意见</td><td colspan="3">'+esc(r.recheck||'—')+'</td></tr></table>';
@@ -596,6 +595,18 @@ function openUnified(id){
  var S=USTATUS[r.status];
  openDrawer('预警详情',
    r.id+(r.wo?' · '+r.wo:'')+' ｜ '+r.town,uDetailBody(r),uFooter(r));
+}
+/* 状态变更后就地刷新原详情抽屉：不关闭、不重新打开 */
+function uRefresh(id){
+ var r=uFind(id);if(!r)return;
+ var w=$('drawerWrap');
+ if(!w||w.style.display!=='block'){openUnified(id);return}
+ var d=$('drawer'),db=d.querySelector('.db');
+ if(!db){openUnified(id);return}
+ var sub=d.querySelector('.dh .tiny');
+ if(sub)sub.textContent=r.id+(r.wo?' · '+r.wo:'')+' ｜ '+r.town;
+ db.innerHTML=uDetailBody(r);
+ var f=d.querySelector('.df');if(f)f.innerHTML=uFooter(r);
 }
 /* 研判确认：沿用告警信号对象本身变更状态生成工单，不新建第二份对象 */
 function uPromoteSignal(sg,toStatus,ledgerAct){
@@ -743,7 +754,7 @@ function uTransition(id,act){
   addEv(o2,'统一详情状态流转：'+old+' → '+USTATUS[t.to].t+'（'+t.t+'）');
  }
  logit('统一状态流转 '+old+'→'+USTATUS[t.to].t,r.id+(r.wo?' / '+r.wo:''));
- save();render();openUnified(r.id);
+ save();render();uRefresh(r.id);
  toast('状态已更新：'+USTATUS[to].t,'ok');
 }
 /* 大屏状态变更广播 → 合并回 PC 后台同库记录 */
