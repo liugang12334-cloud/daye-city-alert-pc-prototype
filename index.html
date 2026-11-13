@@ -479,6 +479,8 @@ function uEnsure(x,kind){
   timeline:(x.events||[]).map(function(e){return {t:e.t,b:e.b,x:e.x}}),
   origin:'PC',srcId:x.id,pcId:x.id
  };
+ /* 待确认 / 待指派：尚未指派处置单位，字段保持为空 */
+ if(r0.status==='waitConfirm'||r0.status==='waitAssign')r0.unit='';
  if(!r0.timeline.length)r0.timeline=[{t:String(r0.time).slice(11,16)||nowHM(),b:'平台自动',
    x:'告警信号接入，建立统一记录 '+r0.id+'（状态：'+USTATUS[r0.status].t+'）'}];
  uRecs().push(r0);
@@ -516,12 +518,18 @@ function uSteps(r){
 }
 function uDetailBody(r){
  var S=USTATUS[r.status],lvTxt=ULV[r.lv]||r.lv;
- var h='<style>#drawer .db td.uk{white-space:nowrap;width:1%;color:#6B7688}</style>';
- h+='<div class="card mb8"><div class="hd"><h3>统一状态</h3>'+
-   '<span class="tag">'+esc(lvTxt)+'预警</span> <span class="tag">'+
-   (S.phase==='warn'?'预警阶段':'预警工单阶段')+'</span> '+uBadge(r.status)+
-   '<span class="sub" style="margin-left:auto">统一记录 '+esc(r.id)+(r.wo?' · '+esc(r.wo):'')+
-   '</span></div><div class="bd">'+uSteps(r)+'</div></div>';
+ var h='<style>#drawer .db td.uk{white-space:nowrap;width:1%;color:#6B7688}'+
+  '.ucards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 10px}'+
+  '.ucard{position:relative;padding:8px 10px 8px 12px;border:1px solid #DDE9F8;background:linear-gradient(90deg,#EAF3FD,#F8FBFF)}'+
+  '.ucard:before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:#1668DC}'+
+  '.ucard em{display:block;font-size:10.5px;color:#6B7688;font-style:normal}'+
+  '.ucard b{display:block;margin-top:3px;font-size:13px;font-weight:700;color:#1B2430;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}</style>';
+ h+='<div class="card mb8"><div class="hd"><h3>统一状态</h3></div><div class="bd">'+
+   '<div class="ucards">'+
+   '<div class="ucard"><em>点位</em><b>'+esc(r.town+(r.spot?' · '+r.spot:''))+'</b></div>'+
+   '<div class="ucard"><em>预警等级</em><b>'+esc(lvTxt)+'预警</b></div>'+
+   '<div class="ucard"><em>告警时间</em><b>'+esc(r.time)+'</b></div></div>'+
+   uSteps(r)+'</div></div>';
  h+='<div class="card mb8"><div class="hd"><h3>基础信息</h3></div><div class="bd">'+
    '<table class="tb">'+
    '<tr><td class="uk">告警编号</td><td class="mono">'+esc(r.id)+'</td><td class="uk">工单编号</td><td class="mono">'+
@@ -529,7 +537,7 @@ function uDetailBody(r){
    '<tr><td class="uk">告警类型</td><td>'+esc(r.type)+'</td><td class="uk">预警等级</td><td>'+esc(lvTxt)+'</td></tr>'+
    '<tr><td class="uk">所在区域</td><td>'+esc(r.town+(r.spot?' · '+r.spot:''))+'</td><td class="uk">信息来源</td><td>'+esc(r.src)+'</td></tr>'+
    '<tr><td class="uk">坐标点位</td><td>'+esc(r.coord)+'</td><td class="uk">告警时间</td><td class="mono">'+esc(r.time)+'</td></tr>'+
-   '<tr><td class="uk">告警描述</td><td>'+esc(r.desc)+'</td><td class="uk">处置单位</td><td>'+esc(r.unit||'待指派')+'</td></tr>'+
+   '<tr><td class="uk">告警描述</td><td>'+esc(r.desc)+'</td><td class="uk">处置单位</td><td>'+(S.phase==='warn'?'':esc(r.unit||''))+'</td></tr>'+
    '</table></div></div>';
  h+='<div class="card mb8"><div class="hd"><h3>研判依据 · 预警阶段留痕，两阶段一致</h3></div><div class="bd">'+
    '<ul style="margin:0;padding-left:18px;font-size:12.5px;line-height:22px;color:#33404F">'+
@@ -542,20 +550,13 @@ function uDetailBody(r){
   h+='<div class="tipbar info mb8" style="display:block"><b>AI 研判结果</b>：'+
     (low?'判定为低等级关注类信号，建议持续监测、暂不生成工单。':
      '综合视频热源、卫星热点与护林员上报，判定为真实火情风险点。')+
-    '<div style="margin-top:6px">置信度 <b>'+conf+'%</b> ｜ 到场时限 '+
-    ({red:'30 分钟内到场',orange:'1 小时内到场',or:'1 小时内到场',yellow:'2 小时内到场',ye:'2 小时内到场',blue:'持续监测',bl:'持续监测'}[r.lv]||'2 小时内到场')+'</div></div>';
-  var defU=r.status==='waitAssign'?(r.unit||UNITS[0]):'';
-  h+='<div class="fi"><span class="lab">'+(r.status==='waitAssign'?'指派单位':'处置单位')+'</span><span class="val">'+
-     '<select class="f" id="_uUnit"><option value="">不指定（研判后转待指派）</option>'+
-     UNITS.map(function(u){return '<option'+(u===defU?' selected':'')+'>'+esc(u)+'</option>'}).join('')+
-     '</select></span></div>'+
-     '<div class="fi"><span class="lab">处置时限</span><span class="val">'+
-     ({red:'30 分钟内到场',orange:'1 小时内到场',or:'1 小时内到场',yellow:'2 小时内到场',ye:'2 小时内到场',blue:'持续监测',bl:'持续监测'}[r.lv]||'2 小时内到场')+
-     '</span></div>';
+    '<div style="margin-top:6px">置信度 <b>'+conf+'%</b>'+
+    (r.limit?' ｜ 处置时限 '+esc(r.limit):'')+'</div></div>';
  }else{
   h+='<table class="tb"><tr>'+tbcols(['工单要素','当前值','工单要素','当前值'])+'</tr>'+
-   '<tr><td class="uk">工单编号</td><td class="mono">'+esc(r.wo||'—')+'</td><td class="uk">派发单位</td><td>'+esc(r.unit||'待指派')+'</td></tr>'+
-   '<tr><td class="uk">签收时间</td><td>'+esc(r.signAt||'—')+'</td><td class="uk">处置结果</td><td>'+esc(r.report||'—')+'</td></tr>'+
+   '<tr><td class="uk">工单编号</td><td class="mono">'+esc(r.wo||'—')+'</td><td class="uk">派发单位</td><td>'+esc(r.unit||'')+'</td></tr>'+
+   '<tr><td class="uk">签收时间</td><td>'+esc(r.signAt||'—')+'</td><td class="uk">处置时限</td><td>'+esc(r.limit||'—')+'</td></tr>'+
+   '<tr><td class="uk">处置结果</td><td colspan="3">'+esc(r.report||'—')+'</td></tr>'+
    '<tr><td class="uk">复核意见</td><td colspan="3">'+esc(r.recheck||'—')+'</td></tr></table>';
   if(r.status==='overtime')h+='<div class="tipbar red" style="display:block;margin-top:8px"><b>已超时</b>：进展反馈超限时触发。可「催办并继续处置」回到处置中，也可「直接提交处置结果」进入待复核；超时记录永久写入流转留痕并计入质效评估。</div>';
   if(r.status==='waitRecheck')h+='<div class="tipbar info" style="display:block;margin-top:8px"><b>待现场复核</b>：处置结果已提交。复核通过 → 已完成 → 归档；复核不通过 → 退回待补充，补充材料后重新提交复核，或退回重新现场处置。</div>';
@@ -572,9 +573,12 @@ function uDetailBody(r){
 }
 function uFooter(r){
  var list=UTRANS[r.status]||[];
- var h='<button class="btn line" onclick="closeDrawer()">关闭</button>';
+ var h='';
  list.forEach(function(t){
-  var fn=t.a==='falseAlarm'?'uFalseAlarm(\''+esc(r.id)+'\')':'uTransition(\''+esc(r.id)+'\',\''+t.a+'\')';
+  var fn;
+  if(t.a==='falseAlarm')fn='uFalseAlarm(\''+esc(r.id)+'\')';
+  else if(t.a==='confirm'||t.a==='assign')fn='uJudgeModal(\''+esc(r.id)+'\',\''+t.a+'\')';
+  else fn='uTransition(\''+esc(r.id)+'\',\''+t.a+'\')';
   h+='<button class="btn'+(t.primary?'':' line')+'" onclick="'+fn+'">'+esc(t.t)+'</button>';
  });
  if(!list.length)h+='<span class="tiny muted" style="align-self:center">已归档 · 只读</span>';
@@ -618,6 +622,63 @@ function uPromoteSignal(sg,toStatus,ledgerAct){
  return sg;
 }
 /* 统一状态流转：只改 status + 留痕，同时回写 PC 工单内部状态（兼容移动端共用数据） */
+/* ================= 研判确认弹窗：人工定级 + 处置单位 + 处置时限 ================= */
+function uJudgeModal(id,act){
+ var r=uFind(id);if(!r)return;
+ act=act||'confirm';var isConfirm=act==='confirm';
+ var lv0=r.lv==='bl'||r.lv==='blue'?'yellow':(r.lv==='or'?'orange':(r.lv==='ye'?'yellow':(r.lv||'yellow')));
+ var lv=lv0;
+ var LVS=JUDGE_LV;
+ var lvs='';LVS.forEach(function(x){
+  lvs+='<div class="jdlv'+(x[0]===lv?' on':'')+'" data-lv="'+x[0]+'" style="flex:1;text-align:center;padding:9px 4px;'+
+    'font-size:13px;font-weight:700;border:1px solid #D7DEE9;border-radius:7px;cursor:pointer;'+
+    (x[0]===lv?'color:#fff;background:'+x[2]+';border-color:transparent':'color:#33404F;background:#F7F9FC')+'">'+x[1]+'</div>';
+ });
+ var unitOpts='<option value="">不指定（研判后转待指派）</option>';
+ UNITS.forEach(function(u){unitOpts+='<option'+(u===r.unit?' selected':'')+'>'+esc(u)+'</option>'});
+ var limOpts='';LIMIT_OPTS.forEach(function(x,i){
+  limOpts+='<option value="'+i+'"'+(i===limitDefault(lv)?' selected':'')+'>'+esc(x[0])+'</option>';
+ });
+ var html='<h3 style="font-size:18px;color:#1668DC;letter-spacing:1px;margin:0 0 6px">'+
+   (isConfirm?'研判确认':'指派单位并派发')+'</h3>'+
+  '<div style="font-size:13px;color:#33404F;line-height:1.8;margin-bottom:14px">告警 '+esc(r.id)+' ｜ '+
+   esc(r.town+(r.spot?' · '+r.spot:''))+'<br>'+
+   (isConfirm?'请完成人工研判定级并配置派发信息。':'请指定处置单位与处置时限，提交后完成派发。')+'</div>'+
+  '<div class="fi"><span class="lab">人工研判定级</span><span class="val">'+
+   '<div id="_jdLvs" style="display:flex;gap:8px">'+lvs+'</div></span></div>'+
+  '<div class="fi"><span class="lab">处置单位</span><span class="val">'+
+   '<select class="f" id="_jdUnit">'+unitOpts+'</select></span></div>'+
+  '<div class="fi"><span class="lab">处置时限</span><span class="val">'+
+   '<select class="f" id="_jdLimit">'+limOpts+'</select></span></div>'+
+  '<div class="tipbar" style="display:block;margin-top:10px">指定处置单位后提交，状态直接变更为「待签收」；'+
+   '未指定则进入「待指派」。处置时限档位依据运行机制到场 15 / 30 / 60 分钟与核查 1 小时反馈。</div>'+
+  '<div class="row" style="justify-content:flex-end;gap:8px;margin-top:16px">'+
+   '<button class="btn line" id="_jdCancel">取消</button>'+
+   '<button class="btn" id="_jdOk">'+(isConfirm?'提交研判':'确认派发')+'</button></div>';
+ modal(html,{width:'560px',center:true});
+ var boxes=$('modalRoot').querySelectorAll('#_jdLvs .jdlv');
+ Array.prototype.forEach.call(boxes,function(el){
+  el.onclick=function(){
+   lv=el.getAttribute('data-lv');
+   var c='';LVS.forEach(function(x){if(x[0]===lv)c=x[2]});
+   Array.prototype.forEach.call(boxes,function(z){
+    var on=z.getAttribute('data-lv')===lv;
+    z.className='jdlv'+(on?' on':'');
+    z.style.color=on?'#fff':'#33404F';
+    z.style.background=on?c:'#F7F9FC';
+    z.style.borderColor=on?'transparent':'#D7DEE9';
+   });
+   var lim=$('_jdLimit');if(lim)lim.value=String(limitDefault(lv));
+  };
+ });
+ $('_jdCancel').onclick=function(){closeModal()};
+ $('_jdOk').onclick=function(){
+  r.lv=lv;r.judgeLv=lv;
+  r.unit=$('_jdUnit')?$('_jdUnit').value:'';
+  r.limit=LIMIT_OPTS[parseInt($('_jdLimit')?$('_jdLimit').value:'0',10)||0][0];
+  closeModal();uTransition(id,act);
+ };
+}
 function uFalseAlarm(id){
  var r=uFind(id);if(!r)return;
  var reasons=['误报 · 云雾/热扰动','误报 · 秸秆焚烧/农事用火','误报 · 设备反光/镜头污损','误报 · 重复告警归并','误报 · 其他'];
@@ -642,8 +703,9 @@ function uTransition(id,act){
  var r=uFind(id);if(!r)return;
  var t=(UTRANS[r.status]||[]).filter(function(x){return x.a===act})[0];if(!t)return;
  var old=USTATUS[r.status].t,to=t.to;
- var sel=$('_uUnit'),unit=sel?sel.value:'';
+ var unit=r.unit||'';
  if(act==='confirm')to=unit?'waitSign':'waitAssign';
+ if(act==='assign')to=unit?'waitSign':'waitAssign';
  if(act==='confirm'||act==='assign'){
   if(!r.wo){
    var sg=byId(DB.signals,r.id)||byId(DB.signals,r.srcId||'');
@@ -663,6 +725,8 @@ function uTransition(id,act){
  if(act==='rework')r.recheck='';
  r.status=to;
  var tx=old+' → '+USTATUS[to].t+'：'+t.t+(r.wo?'（'+r.wo+'）':'');
+ if((act==='confirm'||act==='assign')&&r.judgeLv)tx+='；人工定级 '+(ULV[r.judgeLv]||r.judgeLv)+
+   '；处置时限 '+(r.limit||'—')+(unit?'；处置单位 '+unit:'（未指派）');
  if(act==='falseAlarm'&&r.falseReason)tx+='；原因：'+r.falseReason+(r.falseNote?'；备注：'+r.falseNote:'');
  r.timeline.push({t:nowHM(),b:'PC 后台 · '+ME.n,x:tx});
  var o2=O(r.srcId)||O(r.wo)||O(r.pcId);
@@ -671,12 +735,13 @@ function uTransition(id,act){
   if(act==='markOvertime'||r.overtime)o2.uOvertime=1;
   if(act==='recheckBack')o2.uRecheck=r.recheck;
   if(act==='sign')o2.sign=now();
+  if((act==='confirm'||act==='assign')&&unit)o2.owner=unit;
   if(act==='falseAlarm'){o2.st='falseAlarm'}
   addEv(o2,'统一详情状态流转：'+old+' → '+USTATUS[t.to].t+'（'+t.t+'）');
  }
  logit('统一状态流转 '+old+'→'+USTATUS[t.to].t,r.id+(r.wo?' / '+r.wo:''));
  save();render();openUnified(r.id);
- toast('状态已更新：'+USTATUS[t.to].t,'ok');
+ toast('状态已更新：'+USTATUS[to].t,'ok');
 }
 /* 大屏状态变更广播 → 合并回 PC 后台同库记录 */
 function uOnScreenSync(){
@@ -713,6 +778,14 @@ var PHASE_DONE=['done','archived','falseAlarm'];
 var SRC=['视频烟火识别','卫星遥感热点','物联感知','群众举报','无人机巡航','人工巡护上报','上级转办','移动端巡查上报'];
 var AREAS=['灵乡镇','陈贵镇','殷祖镇','金牛镇','保安镇','还地桥镇','茗山乡','大箕铺镇','刘仁八镇','金山店镇','汪仁镇','东岳路街道','罗家桥街道','金湖街道'];
 var UNITS=['乡镇值班室','村应急扑火小分队','市综合应急救援大队','市资规局（林业）','市公安局','市消防救援大队'];
+/* 处置时限下拉：依据《运行机制》第十四条到场 15 / 30 / 60 分钟、第十二条核查 1 小时反馈 */
+var JUDGE_LV=[['red','红色','#D92B2B'],['orange','橙色','#E07A18'],['yellow','黄色','#C9921A']];
+var LIMIT_OPTS=[
+ ['15 分钟内到场 · 村级先期处置','yellow'],
+ ['30 分钟内到场 · 乡镇半专业队','orange'],
+ ['60 分钟内到场 · 市综合应急救援大队','red'],
+ ['1 小时内核查反馈 · 待核查工单','']];
+function limitDefault(k){return k==='red'?2:k==='orange'?1:0;}
 var RES_TYPE=['Ⅳ级','Ⅲ级','Ⅱ级','Ⅰ级'];
 var LOGS=[];
 
