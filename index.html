@@ -418,9 +418,9 @@ var USTATUS={
    旁支：处置中 ⇄ 已超时；待复核 ⇄ 退回待补充。二者均为可回边状态，非终态。 */
 var UMAIN=['waitConfirm','waitAssign','waitSign','working','waitRecheck','done','archived'];
 var UTRANS={
- waitConfirm:[{a:'confirmAssign',t:'研判确认 · 直接指派并派发',to:'waitSign',primary:1},
-              {a:'confirmOnly',  t:'研判确认 · 转指派',      to:'waitAssign'},
-              {a:'falseAlarm',   t:'误报 / 蓝色关注类归档',  to:'archived'}],
+ /* 研判确认：按是否选择处置单位动态决定「待签收 / 待指派」，见 uTransition */
+ waitConfirm:[{a:'confirm',    t:'研判确认',to:'waitSign',primary:1},
+              {a:'falseAlarm', t:'误报归档',to:'archived'}],
  waitAssign: [{a:'assign',       t:'指派单位并派发',          to:'waitSign',primary:1}],
  waitSign:   [{a:'sign',         t:'属地签收工单',            to:'working',primary:1}],
  working:    [{a:'submitResult', t:'提交处置结果',            to:'waitRecheck',primary:1},
@@ -544,14 +544,14 @@ function uDetailBody(r){
      '综合视频热源、卫星热点与护林员上报，判定为真实火情风险点。')+
     '<div style="margin-top:6px">置信度 <b>'+conf+'%</b> ｜ 到场时限 '+
     ({red:'30 分钟内到场',orange:'1 小时内到场',or:'1 小时内到场',yellow:'2 小时内到场',ye:'2 小时内到场',blue:'持续监测',bl:'持续监测'}[r.lv]||'2 小时内到场')+'</div></div>';
-  if(r.status==='waitAssign'){
-   h+='<div class="fi"><span class="lab">指派单位</span><span class="val"><select class="f" id="_uUnit">'+
-     UNITS.map(function(u){return '<option>'+esc(u)+'</option>'}).join('')+'</select></span></div>'+
-     '<div class="fi"><span class="lab">工单生成方式</span><span class="val">沿用告警记录变更状态，不新建数据对象</span></div>';
-  }else{
-   h+='<table class="tb"><tr>'+tbcols(['研判状态','拟派发单位','工单生成方式'])+'</tr>'+
-     '<tr><td>待值班指挥员确认</td><td>市森防指 + 属地乡镇</td><td>沿用告警记录变更状态，不新建数据对象</td></tr></table>';
-  }
+  var defU=r.status==='waitAssign'?(r.unit||UNITS[0]):'';
+  h+='<div class="fi"><span class="lab">'+(r.status==='waitAssign'?'指派单位':'处置单位')+'</span><span class="val">'+
+     '<select class="f" id="_uUnit"><option value="">不指定（研判后转待指派）</option>'+
+     UNITS.map(function(u){return '<option'+(u===defU?' selected':'')+'>'+esc(u)+'</option>'}).join('')+
+     '</select></span></div>'+
+     '<div class="fi"><span class="lab">处置时限</span><span class="val">'+
+     ({red:'30 分钟内到场',orange:'1 小时内到场',or:'1 小时内到场',yellow:'2 小时内到场',ye:'2 小时内到场',blue:'持续监测',bl:'持续监测'}[r.lv]||'2 小时内到场')+
+     '</span></div>';
  }else{
   h+='<table class="tb"><tr>'+tbcols(['工单要素','当前值','工单要素','当前值'])+'</tr>'+
    '<tr><td class="uk">工单编号</td><td class="mono">'+esc(r.wo||'—')+'</td><td class="uk">派发单位</td><td>'+esc(r.unit||'待指派')+'</td></tr>'+
@@ -574,7 +574,8 @@ function uFooter(r){
  var list=UTRANS[r.status]||[];
  var h='<button class="btn line" onclick="closeDrawer()">关闭</button>';
  list.forEach(function(t){
-  h+='<button class="btn'+(t.primary?'':' line')+'" onclick="uTransition(\''+esc(r.id)+'\',\''+t.a+'\')">'+esc(t.t)+'</button>';
+  var fn=t.a==='falseAlarm'?'uFalseAlarm(\''+esc(r.id)+'\')':'uTransition(\''+esc(r.id)+'\',\''+t.a+'\')';
+  h+='<button class="btn'+(t.primary?'':' line')+'" onclick="'+fn+'">'+esc(t.t)+'</button>';
  });
  if(!list.length)h+='<span class="tiny muted" style="align-self:center">已归档 · 只读</span>';
  return h;
@@ -617,17 +618,39 @@ function uPromoteSignal(sg,toStatus,ledgerAct){
  return sg;
 }
 /* 统一状态流转：只改 status + 留痕，同时回写 PC 工单内部状态（兼容移动端共用数据） */
+function uFalseAlarm(id){
+ var r=uFind(id);if(!r)return;
+ var reasons=['误报 · 云雾/热扰动','误报 · 秸秆焚烧/农事用火','误报 · 设备反光/镜头污损','误报 · 重复告警归并','误报 · 其他'];
+ var html='<h3 style="font-size:18px;color:#1668DC;letter-spacing:1px;margin:0 0 6px">判定误报 · 归档</h3>'+
+  '<div style="font-size:13px;color:#33404F;line-height:1.8;margin-bottom:14px">告警 '+esc(r.id)+
+  ' 判定为误报，归档后不生成工单，本条记录状态变更为「已归档」。</div>'+
+  '<div class="fi"><span class="lab">判定误报 · 原因</span><span class="val"><select class="f" id="_faReason">'+
+  reasons.map(function(x){return '<option>'+esc(x)+'</option>'}).join('')+'</select></span></div>'+
+  '<div class="fi"><span class="lab">研判备注</span><span class="val">'+
+  '<textarea class="f" id="_faNote" placeholder="补充现场判断依据、处置要求…"></textarea></span></div>'+
+  '<div class="tipbar" style="display:block;margin-top:10px">归档后本条预警不再参与派发与处置；判定原因与研判备注写入状态流转留痕，可追溯、不可撤销。</div>'+
+  '<div class="row" style="justify-content:flex-end;gap:8px;margin-top:16px">'+
+  '<button class="btn line" id="_faCancel">取消</button><button class="btn" id="_faOk">确认</button></div>';
+ modal(html,{width:'520px',center:true});
+ $('_faCancel').onclick=function(){closeModal()};
+ $('_faOk').onclick=function(){
+  r.falseReason=$('_faReason').value;r.falseNote=$('_faNote').value.trim();
+  closeModal();uTransition(id,'falseAlarm');
+ };
+}
 function uTransition(id,act){
  var r=uFind(id);if(!r)return;
  var t=(UTRANS[r.status]||[]).filter(function(x){return x.a===act})[0];if(!t)return;
- var old=USTATUS[r.status].t;
- if(act==='confirmAssign'||act==='confirmOnly'||act==='assign'){
+ var old=USTATUS[r.status].t,to=t.to;
+ var sel=$('_uUnit'),unit=sel?sel.value:'';
+ if(act==='confirm')to=unit?'waitSign':'waitAssign';
+ if(act==='confirm'||act==='assign'){
   if(!r.wo){
    var sg=byId(DB.signals,r.id)||byId(DB.signals,r.srcId||'');
-   if(sg){var o=uPromoteSignal(sg,act==='confirmOnly'?'waitAssign':'waitSign');r.wo=o.id;r.srcId=o.id;r.pcId=o.id}
+   if(sg){var o=uPromoteSignal(sg,to);r.wo=o.id;r.srcId=o.id;r.pcId=o.id}
    else r.wo=uNextWo();
   }
-  var sel=$('_uUnit');if(sel)r.unit=sel.value;
+  if(unit)r.unit=unit;
  }
  if(act==='falseAlarm')r.wo='';
  if(act==='sign')r.signAt=nowHM();
@@ -638,11 +661,13 @@ function uTransition(id,act){
  if(act==='recheckPass')r.recheck='复核通过，处置结果与现场一致';
  if(act==='resubmit'){r.recheck='';r.report=(r.report||'')+'（已补充材料并重新提交）'}
  if(act==='rework')r.recheck='';
- r.status=t.to;
- r.timeline.push({t:nowHM(),b:'PC 后台 · '+ME.n,x:old+' → '+USTATUS[t.to].t+'：'+t.t+(r.wo?'（'+r.wo+'）':'')});
+ r.status=to;
+ var tx=old+' → '+USTATUS[to].t+'：'+t.t+(r.wo?'（'+r.wo+'）':'');
+ if(act==='falseAlarm'&&r.falseReason)tx+='；原因：'+r.falseReason+(r.falseNote?'；备注：'+r.falseNote:'');
+ r.timeline.push({t:nowHM(),b:'PC 后台 · '+ME.n,x:tx});
  var o2=O(r.srcId)||O(r.wo)||O(r.pcId);
  if(o2){
-  o2.st=U_TO_ST[t.to]||o2.st;o2.uStatus=t.to;
+  o2.st=U_TO_ST[to]||o2.st;o2.uStatus=to;
   if(act==='markOvertime'||r.overtime)o2.uOvertime=1;
   if(act==='recheckBack')o2.uRecheck=r.recheck;
   if(act==='sign')o2.sign=now();
