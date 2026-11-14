@@ -456,7 +456,7 @@ var UEX_ACTS={
  reassign:{t:'重新分派',ok:'确认重新分派',tip:'重新分派后仍为「待签收」，处置单位与处置时限同步更新，原派发记录留痕保留。',
   f:[['处置单位','@units','','unit'],['处置时限','@limit','','limit'],
      ['分派说明','textarea','请说明重新分派原因…','note']]},
- ignoreFalse:{t:'误报忽略',ok:'确认忽略',tip:'忽略后本条不再参与派发与处置，工单编号清空、状态变更为「已归档」，原因写入流转留痕。',
+ ignoreFalse:{t:'误报忽略',ok:'确认忽略',tip:'忽略后本条不再参与派发与处置，告警工单编号清空、状态变更为「已归档」，原因写入流转留痕。',
   f:[['忽略原因','select',['误报 · 云雾/热扰动','误报 · 秸秆焚烧/农事用火','误报 · 设备反光/镜头污损','误报 · 重复告警归并','误报 · 其他'],'reason'],
      ['研判备注','textarea','补充现场判断依据…','note']]},
  submitFeedback:{t:'提交反馈',ok:'提交反馈',tip:'反馈内容写入处置进展留痕，当前状态保持「处置中」。',
@@ -780,7 +780,7 @@ function uPromoteSignal(sg,toStatus,ledgerAct){
  sg.dispatchees=toStatus==='waitAssign'?[]:['市森防指 + 属地乡镇'];
  sg.owner=toStatus==='waitAssign'?'待指派':'市森防指 + 属地乡镇';
  sg.notifies=[];sg.report=null;sg.etype=ETYPE[0];sg.uBasis=UBASIS.slice();
- /* 按对象引用移除：此时 sg.id 已变更为新工单编号，不能用原告警编号查找 */
+ /* 按对象引用移除：此时 sg.id 已变更为新告警工单编号，不能用原告警编号查找 */
  var i=DB.signals.indexOf(sg);if(i>=0)DB.signals.splice(i,1);
  DB.orders.unshift(sg);
  addSigLedger({act:ledgerAct||'confirm',sid:sid0,type:sg.type,src:sg.src,recv:t0,area:sg.area,
@@ -1884,7 +1884,7 @@ P.overview=function(){
  /* 紧急工单 + 待研判池 */
  h+='<div class="grid g23 mt12">';
  h+='<div class="card"><div class="hd"><h3>重点关注工单<span class="sub">红色 / 处置中 / 临期</span></h3><span class="lnk" onclick="go(\'events\')">预警工单 ›</span></div>'+
-    '<table class="tb"><tr>'+tbcols(['类型','等级','工单编号','标题','乡镇','状态','限时','操作'])+'</tr>'+
+    '<table class="tb"><tr>'+tbcols(['类型','等级','告警工单编号','标题','乡镇','状态','限时','操作'])+'</tr>'+
     (DB.orders.filter(function(o){return PHASE[o.st]!=='已办结'}).sort(function(a,b){
       var w={red:0,orange:1,yellow:2};return (w[a.lv]||3)-(w[b.lv]||3)}).slice(0,6).map(function(o){
       var due=o.st==='approving'?o.dlApprove:o.st==='signing'?o.dlSign:o.st==='working'?(o.dlReport||o.dlFeedback):o.dlReport;
@@ -1974,7 +1974,7 @@ function sigLedgerDetail(id){
   kv('告警编号',r.sid?esc(r.sid):'<span class="tiny muted">历史告警（原编号未留存，按统一记录溯源）</span>')+kv('告警类型',r.type?typeTag(r.type):'—')+kv('来源渠道',esc(r.src||'—'))+
   kv('接收时间',esc(r.recv||'—'))+kv('区域 · 点位',esc(r.area||'—')+(r.place?'<div class="tiny muted">'+esc(r.place)+'</div>':''))+
   kv('告警摘要',esc(r.d||'—'))+kv('处置结论',sigActTag(r.act))+kv('预警等级',r.lv?lvTag(r.lv):'—')+
-  /* 预警编号与工单为同一条记录：确认后仅补工单编号，不另设关联工单字段 */
+  /* 预警编号与工单为同一条记录：确认后仅补告警工单编号，不另设关联工单字段 */
   kv('研判意见',esc(r.note||'—'))+kv('处置人 / 时间',esc(r.by||'—')+' · '+esc(r.at||'—'))+
   '<div class="row mt12"><span class="tiny muted">台账为只读留痕，处置后自动生成，不可修改</span>'+
   (r.oid?'<span class="lnk" style="margin-left:auto" onclick="closeModal();openUnified(\''+esc(r.oid)+'\')">查看预警工单详情 ›</span>':'')+'</div>',{width:'560px'});
@@ -2294,7 +2294,7 @@ P.events=function(){
    '<option value="">全部等级</option>'+ELV_ORDER.map(function(k){return '<option value="'+k+'"'+(f.lv===k?' selected':'')+'>'+elvName(k)+'</option>'}).join('')+'</select>'+
   '<button class="btn" onclick="newOrderForm()">＋ 新建工单</button>'+
   '<span class="tiny muted">共 '+arr.length+' 起工单</span></div></div></div>';
- var cols=['工单类型','告警类型','工单编号','时间','信息来源','工单摘要','区域','工单等级','状态','环节进度','责任主体 / 派发对象','操作'];
+ var cols=['工单类型','告警类型','告警工单编号','时间','信息来源','工单摘要','区域','工单等级','状态','环节进度','责任主体 / 派发对象','操作'];
  h+='<div class="card"><div style="overflow-x:auto"><table class="tb odtb"><tr>'+tbcols(cols)+'</tr>'+
   (arr.map(function(x){
    var o=x.k==='order'?(O(x.id)||{}):{};
@@ -2447,7 +2447,7 @@ function openOrderDetail(id){
  if(!x){toast('工单不存在','err');return}
  var kv=function(k,v){return '<div class="kv"><span class="k">'+k+'</span><span class="v">'+v+'</span></div>'};
  var b='<div class="card mb8"><div class="hd"><h3>工单要素</h3>'+typeTag(x.type)+' '+lvTag(x.lv)+'</div><div class="bd">'+
-  kv('工单编号',esc(x.id))+kv('工单类型',esc(x.etype))+kv('阶段',phTag(x.st))+kv('状态',stTag(x.st))+kv('当前环节',flowTag(x.st))+
+  kv('告警工单编号',esc(x.id))+kv('工单类型',esc(x.etype))+kv('阶段',phTag(x.st))+kv('状态',stTag(x.st))+kv('当前环节',flowTag(x.st))+
   kv('告警类型',typeTag(x.type))+kv('工单等级',lvTag(x.lv))+kv('所属地区',esc(x.area))+
   kv('工单标题',esc(x.title))+kv('位置描述',esc(x.place||'—'))+kv('信息来源',esc(x.src))+
   kv('责任主体',esc(x.owner||'待指派'))+kv('工单时间',esc(x.t))+
@@ -2604,7 +2604,7 @@ function openOrder(id){
 
  var b='';
  b+='<div class="card mb8"><div class="hd"><h3>工单要素</h3>'+typeTag(o.type)+' '+lvTag(o.lv)+' '+stTag(o.st)+' '+phTag(o.st)+'</div><div class="bd">'+
-   '<div class="kv"><span class="k">工单编号</span><span class="v mono">'+esc(o.id)+'</span></div>'+
+   '<div class="kv"><span class="k">告警工单编号</span><span class="v mono">'+esc(o.id)+'</span></div>'+
    '<div class="kv"><span class="k">工单类型</span><span class="v">'+esc(o.etype||odTypeOf({k:'order',lv:o.lv,dispatchees:o.dispatchees}))+'</span></div>'+
    '<div class="kv"><span class="k">阶段</span><span class="v">'+phTag(o.st)+'</span></div>'+
    '<div class="kv"><span class="k">状态</span><span class="v">'+stTag(o.st)+'</span></div>'+
@@ -2685,16 +2685,16 @@ P.check=function(){
  };
  var h='<div class="tipbar info mb8">复核规则：处置结果提交后进入<b>待复核</b>，由市应急局选择<b>图核 / 电话核查 / 现场核查 / 视频复核</b>其一确认；复核通过 → <b>已完成</b>，须完成质效评估后销号归档（保存 ≥'+DB.cfg.ARCHIVE_YEAR+' 年）；不通过 → <b>退回待补充</b>，补充材料后重新提交复核，或退回重新现场处置。</div>';
  h+='<div class="card mb8"><div class="bd" style="padding:10px 12px"><div class="row wrap" style="gap:8px">'+
-  '<input class="f" style="width:240px" placeholder="搜索工单编号 / 摘要 / 乡镇" value="'+esc(kw)+'" oninput="F.check.kw=this.value;clearTimeout(window.__t);window.__t=setTimeout(render,300)">'+
+  '<input class="f" style="width:240px" placeholder="搜索告警工单编号 / 摘要 / 乡镇" value="'+esc(kw)+'" oninput="F.check.kw=this.value;clearTimeout(window.__t);window.__t=setTimeout(render,300)">'+
   typeFilter('F.check.type',F.check.type)+
   '<span class="tiny muted">待复核 '+wait.length+' 起 · 退回待补充 '+back.length+' 起</span></div></div></div>';
- var cols=['类型','等级','工单编号','摘要','乡镇','处置单位','处置结果','状态','操作'];
+ var cols=['类型','等级','告警工单编号','摘要','乡镇','处置单位','处置结果','状态','操作'];
  h+='<div class="card"><div class="hd"><h3>待复核队列</h3></div><table class="tb"><tr>'+tbcols(cols)+'</tr>'+
   ((wait.concat(back)).map(function(r){
    return row(r,'<span class="lnk" onclick="verifyPanel(\''+esc(r.id)+'\')">复核 ›</span> <span class="lnk" onclick="openUnified(\''+esc(r.id)+'\')">详情</span>');
   }).join('')||'<tr><td colspan="9">'+emptyBox('暂无待复核工单')+'</td></tr>')+'</table></div>';
  h+='<div class="card mt12"><div class="hd"><h3>近期复核结论</h3></div><table class="tb"><tr>'+
-  tbcols(['类型','工单编号','摘要','乡镇','复核方式','复核结论','状态'])+'</tr>'+
+  tbcols(['类型','告警工单编号','摘要','乡镇','复核方式','复核结论','状态'])+'</tr>'+
   (hist.map(function(r){
    var way='',res='';
    (r.timeline||[]).forEach(function(e){
@@ -2762,7 +2762,7 @@ P.archive=function(){
    typeFilter('F.archive.type',F.archive.type)+
    '<button class="btn line btn-xs" onclick="exportArchive()">导出检索结果（JSON）</button>'+
    '<span class="tiny muted">归档 '+arr.length+' 起</span></div></div></div>';
- h+='<div class="card"><table class="tb"><tr>'+tbcols(['类型','等级','工单编号','标题','乡镇','办结/归档时间','结果认定','状态','操作'])+'</tr>'+
+ h+='<div class="card"><table class="tb"><tr>'+tbcols(['类型','等级','告警工单编号','标题','乡镇','办结/归档时间','结果认定','状态','操作'])+'</tr>'+
   (arr.map(function(o){
    var t=(o.events&&o.events.length)?o.events[o.events.length-1].t:'—';
    return '<tr class="click"><td>'+typeTag(o.type)+'</td><td>'+lvTag(o.lv)+'</td><td class="nowrap mono">'+esc(o.id)+'</td><td>'+esc(o.title)+'</td>'+
@@ -2955,7 +2955,7 @@ P.resp=function(){
  var h='<div class="tipbar info mb8">成灾线：红色工单处置超时（森林火灾 6 小时未扑灭 / 洪涝、地质灾害达到响应阈值）→ 建议启动 <b>Ⅳ 级</b> 应急响应，12/24/48 小时逐级升档。本期平台先做计时与提示，流程是否完整纳入【待客户确认 C6】。</div>';
  h+='<div class="grid g23">';
  h+='<div class="card"><div class="hd"><h3>响应计时监控（红色工单）</h3></div>'+
-  '<table class="tb"><tr>'+tbcols(['类型','工单编号','标题','乡镇','已耗时','距Ⅳ级启动','操作'])+'</tr>'+
+  '<table class="tb"><tr>'+tbcols(['类型','告警工单编号','标题','乡镇','已耗时','距Ⅳ级启动','操作'])+'</tr>'+
   (cand.map(function(o){return '<tr class="click"><td>'+typeTag(o.type)+'</td><td class="nowrap mono">'+esc(o.id)+'</td><td>'+esc(o.title)+'</td><td>'+esc(o.area)+'</td>'+
    '<td class="nowrap mono">'+esc(o.create)+'</td><td class="nowrap">'+cdSpan(o.dlResp)+'</td>'+
    '<td class="nowrap"><span class="lnk" onclick="startResp(\''+o.id+'\')">启动响应</span></td></tr>'}).join('')||
